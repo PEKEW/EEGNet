@@ -342,6 +342,6 @@ def label_process() -> Dict[str, Dict[str, int]]:
 
 if __name__ == '__main__':
     # video_process(data_clip_info)
-    video_process_multi(data_clip_info)
+    # video_process_multi(data_clip_info)
     log_process(data_clip_info)
     label_process()
