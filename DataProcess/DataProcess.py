@@ -128,8 +128,8 @@ data_clip_info = {
             'end': 196
         },
         'CM': {
-            'begin': 44,
-            'end': 334
+            'begin': 78,
+            'end': 367
         },
         'TX': {
             'begin': 2,
@@ -155,6 +155,10 @@ data_clip_info = {
         'WJX': {
             'begin': 3,
             'end': 233
+        },
+        'YHY': {
+            'begin': 2,
+            'end': 268
         }
 }
 
@@ -341,7 +345,7 @@ def label_process() -> Dict[str, Dict[str, int]]:
 
 
 if __name__ == '__main__':
-    # video_process(data_clip_info)
-    # video_process_multi(data_clip_info)
+    video_process(data_clip_info)
+    video_process_multi(data_clip_info)
     log_process(data_clip_info)
     label_process()

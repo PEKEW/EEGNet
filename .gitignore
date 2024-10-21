@@ -1,3 +1,9 @@
 DataProcess/Videos
 DataProcess/ClipVideo
 DataProcess/OpticalFlows
+DataProcess/OpticalFlows_bak
+DataProcess/Logs
+DataProcess/*.csv
+DataProcess/.json
+DataProcess/*.mp3
+*.json
