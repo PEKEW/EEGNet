@@ -7,7 +7,8 @@
         {
             "name": "python eeg",
             "type": "debugpy",
-            "python": "D:\\Tools\\conda\\python.exe",
+            // "python": "D:\\Tools\\conda\\python.exe",
+            "python": "/Users/whoami/anaconda3/envs/EEGNet/bin/python",
             "request": "launch",
             "program": "${file}",
             "justMyCode": true
