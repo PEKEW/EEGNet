@@ -12,6 +12,7 @@ import os
 import math
 
 FPS = 30
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @dataclass
 class Frame: 
@@ -27,7 +28,6 @@ class Frame:
 class LogProcessor:
     def __init__(self, data_clip_info: Dict[str, Dict[str, int]]) -> None:
         self.data_clip_info = data_clip_info
-        self.current_dir = os.path.dirname(os.path.abspath(__file__))
 
     def process(self) -> None:
         norm_logs = {}
@@ -38,7 +38,7 @@ class LogProcessor:
         self._save_norm_logs(norm_logs)
 
     def _get_log_file_path(self, sub_name: str) -> str:
-        return os.path.join(self.current_dir, 'Logs', f'{sub_name}Log.txt')
+        return os.path.join(CURRENT_DIR, 'Logs', f'{sub_name}Log.txt')
 
     def _process_subject(self, sub_name: str, clip_info: Dict[str, int]) -> Dict[str, Dict[str, Frame]]:
         log_file_name = self._get_log_file_path(sub_name)
@@ -73,6 +73,9 @@ class LogProcessor:
         # 使用绝对时间计算
         expected_slice_count = math.ceil(clip_info['end'] - clip_info['begin']) 
         tmp = start_time
+        # log的采样率不完全是30fps，所以需要根据时间戳来划分slice
+        # 否则就会出现整体偏移 最后少cut几个slice
+        # 
         slice_range = []
         for _ in range(expected_slice_count):
             slice_range.append((tmp, tmp + 1))
@@ -128,8 +131,7 @@ class LogProcessor:
 
     @staticmethod
     def _save_norm_logs(norm_logs: Dict[str, Dict[str, Dict[str, Frame]]]) -> None:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        norm_logs_dir = os.path.join(current_dir, 'norm_logs.json')
+        norm_logs_dir = os.path.join(CURRENT_DIR, 'norm_logs.json')
         try:
             with open(norm_logs_dir, 'w') as f:
                 json.dump(norm_logs, f, default=lambda o: o.__dict__)
@@ -142,42 +144,43 @@ def log_process(data_clip_info: Dict[str, Dict[str, int]]) -> None:
 
 
 data_clip_info = {
-        'TYR': {
-            'begin': 10,
-            'end': 263
-        },
-        'XSJ': {
-            'begin': 26,
-            'end': 196
-        },
+        # 'TYR': {
+        #     'begin': 10,
+        #     'end': 263
+        # },
+        # 'XSJ': {
+        #     'begin': 26,
+        #     'end': 196
+        # },
         'CM': {
             'begin': 78,
             'end': 367
         },
-        'TX': {
-            'begin': 2,
-            'end': 227
-        },
-        'HZ':{
-            'begin': 4,
-            'end': 237
-        },
-        'CYL':{
-            'begin': 4,
-            'end': 292
-        },
-        'GKW': { 
-            'begin': 22,
-            'end': 168
-        },
-        'LMH':{
-            'begin': 7,
-            'end': 310
-        },
-        'WJX': {
-            'begin': 3,
-            'end': 233
-        },
+        # 'TX': {
+        #     'begin': 2,
+        #     'end': 227
+        # },
+        # 'HZ':{
+        #     'begin': 4,
+        #     'end': 237
+        # },
+        # 'CYL':{
+        #     'begin': 4,
+        #     'end': 292
+        # },
+        # 'GKW': { 
+        #     'begin': 22,
+        #     'end': 168
+        # },
+        # 'LMH':{
+        #     'begin': 7,
+        #     'end': 310
+        # },
+        # 'WJX': {
+        #     'begin': 3,
+        #     'end': 233
+        # },
+        
 }
 
 
@@ -215,8 +218,7 @@ def cal_optical_flow(videoRootPath:str, videoID :str) -> None:
     vd = cv.VideoCapture(videoRootPath)
     _, frame1 = vd.read()
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    file_name = os.path.join(current_dir, 'OpticalFlows', f'{videoID}frame_0_original.png')
+    file_name = os.path.join(CURRENT_DIR, 'OpticalFlows', f'{videoID}frame_0_original.png')
     cv.imwrite(file_name, frame1)
     prvs = cv.cvtColor(frame1, cv.COLOR_BGR2GRAY)
     hsv = np.zeros_like(frame1)
@@ -228,7 +230,7 @@ def cal_optical_flow(videoRootPath:str, videoID :str) -> None:
         if not ret:
             print('Video End, total frames:', idx+1)
             break
-        file_name = os.path.join(current_dir, 'OpticalFlows', f'{videoID}frame_{idx}_original.png')
+        file_name = os.path.join(CURRENT_DIR, 'OpticalFlows', f'{videoID}frame_{idx}_original.png')
         cv.imwrite(file_name, frame2)
         next = cv.cvtColor(frame2, cv.COLOR_BGR2GRAY)
         flow = cv.calcOpticalFlowFarneback(prvs, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
@@ -236,7 +238,7 @@ def cal_optical_flow(videoRootPath:str, videoID :str) -> None:
         hsv[..., 0] = ang * 180 / np.pi / 2
         hsv[..., 2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)
         bgr = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
-        file_name = os.path.join(current_dir, 'OpticalFlows', f'{videoID}frame_{idx}_optical.png')
+        file_name = os.path.join(CURRENT_DIR, 'OpticalFlows', f'{videoID}frame_{idx}_optical.png')
         cv.imwrite(file_name, bgr)
         prvs = next
         idx += 1
@@ -254,54 +256,31 @@ def video_process_multi(data_clip_info: Dict[str, Dict[str, int]]) -> None:
                 print(f'Error: {e}')
 def process_subject(sub_name: str, clip_info: Dict[str, int]) -> None:
     print(f'Processing {sub_name} (1st Clip (norm))')
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    input_video = os.path.join(current_dir, 'Videos', f'{sub_name}.mp4')
-    downsmapled_video = os.path.join(current_dir, 'Videos', f'down_{sub_name}.mp4')
-    normalized_video = os.path.join(current_dir, 'Videos', f'norm_{sub_name}.mp4')
+    input_video = os.path.join(CURRENT_DIR, 'Videos', f'{sub_name}.mp4')
+    downsmapled_video = os.path.join(CURRENT_DIR, 'Videos', f'down_{sub_name}.mp4')
+    normalized_video = os.path.join(CURRENT_DIR, 'Videos', f'norm_{sub_name}.mp4')
     os.makedirs('Videos', exist_ok=True)
-    down_sample(input_video, downsmapled_video)
-    clipVideo(str(downsmapled_video), str(normalized_video), clip_info['begin'], clip_info['end'])
+    # down_sample(input_video, downsmapled_video)
+    # clipVideo(str(downsmapled_video), str(normalized_video), clip_info['begin'], clip_info['end'])
     clip_duration = clip_info['end'] - clip_info['begin']
-    process_video_slices(sub_name, normalized_video, clip_duration)
+    # process_video_slices(sub_name, normalized_video, clip_duration)
     process_optical_flow(sub_name, clip_duration)
-    # todo path error
-    # write_dataset_csv(sub_name, clip_duration)
+
 
 def process_video_slices(sub_name: str, video_path: Path, clip_duration: int) -> None:
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    clip_dir = os.path.join(current_dir, 'ClipVideo')
+    clip_dir = os.path.join(CURRENT_DIR, 'ClipVideo')
     os.makedirs(clip_dir, exist_ok=True)
     for second in range(clip_duration):
         print(f'slicing video: {second+1} / {clip_duration}')
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        output_clip = os.path.join(current_dir, 'ClipVideo', f'norm_{sub_name}_{second}.mp4')
+        output_clip = os.path.join(CURRENT_DIR, 'ClipVideo', f'norm_{sub_name}_{second}.mp4')
         clipVideo(str(video_path), str(output_clip), second, second+1)
 
 def process_optical_flow(sub_name: str, clip_duration: int) -> None:
-    optical_dir = os.path.join(current_dir, 'OpticalFlows')
+    optical_dir = os.path.join(CURRENT_DIR, 'OpticalFlows')
     os.makedirs(optical_dir, exist_ok=True)
     for clip_id in range(clip_duration):
-        in_ = os.path.join(current_dir, 'ClipVideo', f'norm_{sub_name}_{clip_id}.mp4')
+        in_ = os.path.join(CURRENT_DIR, 'ClipVideo', f'norm_{sub_name}_{clip_id}.mp4')
         cal_optical_flow(in_, f'sub_{sub_name}_sclice_{clip_id}_')
-
-def write_dataset_csv(sub_name: str, clip_duration: int) -> None:
-    csv_path = Path('datasets.csv')
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    with csv_path.open('a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        if csv_path.stat*(0).st_size == 0:
-            writer.writerow(['subj', 'Slice', 'Frame', 'OriginalPath', 'OpticalPath'])
-        for clip_id in range(clip_duration):
-            for frame in range(FPS):
-                writer.writerow([
-                    f'sub_{sub_name}',
-                    f'_sclice_{clip_id}',
-                    f'_frame_{frame}',
-                    f'_originalPath_OpticalFlows/sub_{sub_name}_sclice_{clip_id}_frame{frame}_original.png',
-                    f'_OpticalPath_OpticalFlows/sub_{sub_name}_sclice_{clip_id}_frame{frame}_optical.png'
-                ])
-
-
 
 def label_process() -> Dict[str, Dict[str, int]]:
     def process_slice(slice: Dict[str, Dict[str, str]]) -> int:
@@ -315,17 +294,14 @@ def label_process() -> Dict[str, Dict[str, int]]:
                         any_complete_sickness
                     )
                     
-        # print(f"- Is positive: {is_positive}")
-        
         return 1 if is_positive else 0
 
     result = defaultdict(dict)
     pos_label_cnt = 0
     neg_label_cnt = 0
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    norm_logs_path = os.path.join(current_dir, "norm_logs.json")
-    labels_path = os.path.join(current_dir, "labels.json")
+    norm_logs_path = os.path.join(CURRENT_DIR, "norm_logs.json")
+    labels_path = os.path.join(CURRENT_DIR, "labels.json")
 
     try:
         with open(norm_logs_path, "r") as f:
@@ -358,10 +334,9 @@ def label_process() -> Dict[str, Dict[str, int]]:
 
 
 if __name__ == '__main__':
-    current_dir = os.path.dirname(os.path.abspath(__file__))
     directories = ['Videos', 'ClipVideo', 'OpticalFlows', 'Frames', 'Logs']
     for directory in directories:
-        dir_path = os.path.join(current_dir, directory)
+        dir_path = os.path.join(CURRENT_DIR, directory)
         os.makedirs(dir_path, exist_ok=True)
     video_process_multi(data_clip_info)
     log_process(data_clip_info)

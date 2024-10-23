@@ -5,14 +5,11 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "python eeg",
+            "name": "Python 调试程序: 当前文件",
             "type": "debugpy",
-            "python": "/home/pekew/miniconda3/envs/EEGNet/bin/python",
-            // "python": "D:\\Tools\\conda\\python.exe",
-            // "python": "/Users/whoami/anaconda3/envs/EEGNet/bin/python",
             "request": "launch",
             "program": "${file}",
-            "justMyCode": true
+            "console": "integratedTerminal"
         }
     ]
 }
