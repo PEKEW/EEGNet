@@ -142,11 +142,11 @@ def log_process(data_clip_info: Dict[str, Dict[str, int]]) -> None:
 
 
 data_clip_info = {
-        'TYR': {
+        'TYR': { # ?
             'begin': 10,
             'end': 263
         },
-        'XSJ': {
+        'XSJ': { # ?
             'begin': 26,
             'end': 196
         },
@@ -154,30 +154,48 @@ data_clip_info = {
             'begin': 78,
             'end': 367
         },
-        'TX': {
+        'TX': { # ?
             'begin': 2,
             'end': 227
         },
-        'HZ':{
+        'HZ':{ # ?
             'begin': 4,
             'end': 237
         },
-        'CYL':{
+        'CYL':{  # ?
             'begin': 4,
             'end': 292
         },
-        'GKW': { 
+        'GKW': {  # ?
             'begin': 22,
             'end': 168
         },
-        'LMH':{
+        'LMH':{ # ?
             'begin': 7,
             'end': 310
         },
-        'WJX': {
+        'WJX': { # ?
             'begin': 3,
             'end': 233
         },
+
+        'CWG':{
+            'begin': 3,
+            'end': 209
+        },
+        'SHQ':{
+            'begin': 2,
+            'end': 122
+        },
+        'YHY':{
+            'begin': 2,
+            'end': 268
+        },
+        'YCR':{
+            'begin': 3,
+            'end': 242
+        },
+        
 }
 
 
@@ -192,7 +210,7 @@ def down_sample(videoPath:str, outPath:str, fps:int=30) -> None:
     newClip.write_videofile(outPath, fps=fps)
 
 
-def clipVideo(videoPath:str, outPath: str, startTime:int, endTime:int) -> None:
+def clip_video(videoPath:str, outPath: str, startTime:int, endTime:int) -> None:
     """clip video
     Args:
         videoPath (str): video path
@@ -244,28 +262,42 @@ def cal_optical_flow(videoRootPath:str, videoID :str) -> None:
 
 
 def video_process_multi(data_clip_info: Dict[str, Dict[str, int]]) -> None:
-    with ThreadPoolExecutor() as executor:
-        future = [executor.submit(process_subject, sub_name, clip_info)
+    with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 8)) as executor:
+        futures = [executor.submit(process_subject, sub_name, clip_info)
                 for sub_name, clip_info in data_clip_info.items()]
-        for future in as_completed(future):
+
+        total = len(futures)
+        completed = 0
+        for future in as_completed(futures):
             try:
                 future.result()
+                completed += 1
+                print(f'Completed {completed} / {total}')
             except Exception as e:
                 print(f'Error: {e}')
+                import traceback
+                traceback.print_exc()
 def process_subject(sub_name: str, clip_info: Dict[str, int]) -> None:
-    print(f'Processing {sub_name} (1st Clip (norm))')
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    input_video = os.path.join(current_dir, 'Videos', f'{sub_name}.mp4')
-    downsmapled_video = os.path.join(current_dir, 'Videos', f'down_{sub_name}.mp4')
-    normalized_video = os.path.join(current_dir, 'Videos', f'norm_{sub_name}.mp4')
-    os.makedirs('Videos', exist_ok=True)
-    down_sample(input_video, downsmapled_video)
-    clipVideo(str(downsmapled_video), str(normalized_video), clip_info['begin'], clip_info['end'])
-    clip_duration = clip_info['end'] - clip_info['begin']
-    process_video_slices(sub_name, normalized_video, clip_duration)
-    process_optical_flow(sub_name, clip_duration)
-    # todo path error
-    # write_dataset_csv(sub_name, clip_duration)
+    try:
+        print(f'Processing {sub_name} (1st Clip (norm))')
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        input_video = os.path.join(current_dir, 'Videos', f'{sub_name}.mp4')
+        downsmapled_video = os.path.join(current_dir, 'Videos', f'down_{sub_name}.mp4')
+        normalized_video = os.path.join(current_dir, 'Videos', f'norm_{sub_name}.mp4')
+        os.makedirs('Videos', exist_ok=True)
+        down_sample(input_video, downsmapled_video)
+        clip_video(str(downsmapled_video), str(normalized_video), clip_info['begin'], clip_info['end'])
+        clip_duration = clip_info['end'] - clip_info['begin']
+        process_video_slices(sub_name, normalized_video, clip_duration)
+
+
+        process_optical_flow(sub_name, clip_duration)
+    except Exception as e:
+        print(f'Error processing {sub_name}: {e}')
+        raise
+    finally:
+        import gc
+        gc.collect()
 
 def process_video_slices(sub_name: str, video_path: Path, clip_duration: int) -> None:
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -275,7 +307,7 @@ def process_video_slices(sub_name: str, video_path: Path, clip_duration: int) ->
         print(f'slicing video: {second+1} / {clip_duration}')
         current_dir = os.path.dirname(os.path.abspath(__file__))
         output_clip = os.path.join(current_dir, 'ClipVideo', f'norm_{sub_name}_{second}.mp4')
-        clipVideo(str(video_path), str(output_clip), second, second+1)
+        clip_video(str(video_path), str(output_clip), second, second+1)
 
 def process_optical_flow(sub_name: str, clip_duration: int) -> None:
     optical_dir = os.path.join(current_dir, 'OpticalFlows')
@@ -283,25 +315,6 @@ def process_optical_flow(sub_name: str, clip_duration: int) -> None:
     for clip_id in range(clip_duration):
         in_ = os.path.join(current_dir, 'ClipVideo', f'norm_{sub_name}_{clip_id}.mp4')
         cal_optical_flow(in_, f'sub_{sub_name}_sclice_{clip_id}_')
-
-def write_dataset_csv(sub_name: str, clip_duration: int) -> None:
-    csv_path = Path('datasets.csv')
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    with csv_path.open('a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        if csv_path.stat*(0).st_size == 0:
-            writer.writerow(['subj', 'Slice', 'Frame', 'OriginalPath', 'OpticalPath'])
-        for clip_id in range(clip_duration):
-            for frame in range(FPS):
-                writer.writerow([
-                    f'sub_{sub_name}',
-                    f'_sclice_{clip_id}',
-                    f'_frame_{frame}',
-                    f'_originalPath_OpticalFlows/sub_{sub_name}_sclice_{clip_id}_frame{frame}_original.png',
-                    f'_OpticalPath_OpticalFlows/sub_{sub_name}_sclice_{clip_id}_frame{frame}_optical.png'
-                ])
-
-
 
 def label_process() -> Dict[str, Dict[str, int]]:
     def process_slice(slice: Dict[str, Dict[str, str]]) -> int:
@@ -359,7 +372,7 @@ def label_process() -> Dict[str, Dict[str, int]]:
 
 if __name__ == '__main__':
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    directories = ['Videos', 'ClipVideo', 'OpticalFlows', 'Frames', 'Logs']
+    directories = ['Videos', 'ClipVideo', 'OpticalFlows', 'Logs']
     for directory in directories:
         dir_path = os.path.join(current_dir, directory)
         os.makedirs(dir_path, exist_ok=True)
