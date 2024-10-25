@@ -8,9 +8,11 @@ from typing import Dict, Tuple, Optional, List
 from pathlib import Path
 
 class VRMotionSicknessDataset(Dataset):
-    """自定义数据集用于加载VR眩晕数据
+    """
     每个样本包含:
+    - 30帧的原始图像序列 (1秒的数据)
     - 30帧光流图像序列 (1秒的数据)
+    - (*, 30)帧的运动数据（日志） 不完全到30帧 因为unity的log有时间差
     - 对应的标签 (0或1表示是否有眩晕症状)
     """
     def __init__(
@@ -32,11 +34,10 @@ class VRMotionSicknessDataset(Dataset):
         self.root_dir = Path(root_dir)
         self.transform = transform
         
-        # 加载标签数据
+        # 加载标签和日志
         with open(labels_file, 'r') as f:
             self.labels = json.load(f)
             
-        # 加载规范化日志数据（如果需要额外特征）
         with open(norm_logs_file, 'r') as f:
             self.norm_logs = json.load(f)
             

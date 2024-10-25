@@ -142,60 +142,67 @@ def log_process(data_clip_info: Dict[str, Dict[str, int]]) -> None:
 
 
 data_clip_info = {
-        'TYR': { # ?
+        'TYR': { # 263 - 10 = 253
             'begin': 10,
             'end': 263
         },
-        'XSJ': { # ?
+        'XSJ': { # 196 - 26 = 170
             'begin': 26,
             'end': 196
         },
-        'CM': {
-            'begin': 78,
+        'CM': { # ica
+            'begin': 78, # 367-78 = 289
             'end': 367
         },
-        'TX': { # ?
+        'TX': { # 227 - 2 = 225
             'begin': 2,
             'end': 227
         },
-        'HZ':{ # ?
+        'HZ':{ # ICA # 237 - 4 = 233
             'begin': 4,
             'end': 237
         },
-        'CYL':{  # ?
+        'CYL':{ # ICA  # 292 - 4 = 288
             'begin': 4,
             'end': 292
         },
-        'GKW': {  # ?
+        'GKW': {  # ICA # 168 - 22 = 146
             'begin': 22,
             'end': 168
         },
-        'LMH':{ # ?
+        'LMH':{ # 310 - 7 = 303
             'begin': 7,
             'end': 310
         },
-        'WJX': { # ?
+        'WJX': { # 233 - 3 = 230
             'begin': 3,
             'end': 233
         },
 
-        'CWG':{
+        'CWG':{# ICA  # 209 - 3 = 206
             'begin': 3,
             'end': 209
         },
-        'SHQ':{
+        'SHQ':{ # 122 - 2 = 120
             'begin': 2,
             'end': 122
         },
-        'YHY':{
+        'YHY':{ # 268 - 2 = 266
             'begin': 2,
             'end': 268
         },
-        'YCR':{
-            'begin': 3,
-            'end': 242
+        'LZX':{ # 244 - 11 = 233
+            'begin': 11,
+            'end': 244
         },
-        
+        'LJ':{ # 252 - 3 = 249
+            'begin': 3,
+            'end': 252
+        },
+        'WZT':{ # 254 - 5 = 249
+            'begin': 5,
+            'end': 254
+        }
 }
 
 
@@ -376,6 +383,6 @@ if __name__ == '__main__':
     for directory in directories:
         dir_path = os.path.join(current_dir, directory)
         os.makedirs(dir_path, exist_ok=True)
-    video_process_multi(data_clip_info)
+    # video_process_multi(data_clip_info)
     log_process(data_clip_info)
     label_process()
