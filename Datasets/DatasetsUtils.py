@@ -1,4 +1,4 @@
-import torch
+import torch # tag
 from typing import Optional, Dict
 from torch import nn
 from typing import Union
@@ -31,7 +31,8 @@ def move_to_device(batch: BatchData, device: str) -> BatchData:
         motion_features=batch.motion_features.to(device),
         motion_metadata=batch.motion_metadata,
         labels=batch.labels.to(device),
-        mask=batch.mask.to(device)
+        mask=batch.mask.to(device),
+        eeg_data=batch.eeg_data.to(device)
     )
 
 class CollateProcessor:
@@ -83,23 +84,14 @@ class CollateProcessor:
         normalized = (features_flat - mean) / std
         return normalized.reshape(B, T, F)
     
-    def __call__(self, batch: List[Tuple]) -> BatchData:
-        """处理批量数据，直接处理元组形式的数据"""
-        # 解包batch中的元组数据
-        batch_unpacked = [
-            (
-                frames_opt,  # frames_optical
-                frames_orig, # frames_original
-                motion_data, # motion_data
-                label       # label
-            ) for frames_opt, frames_orig, motion_data, label in batch
-        ]
-        
-        # 分别提取每种数据
-        frames_optical = [item[0] for item in batch_unpacked]
-        frames_original = [item[1] for item in batch_unpacked]
-        motion_data = [item[2] for item in batch_unpacked]
-        labels = [item[3] for item in batch_unpacked]
+    def __call__(self, batch: List[Dict]) -> BatchData:
+        """处理批量数据，适应新的字典格式"""
+        # 直接从字典中提取数据
+        frames_optical = [item['frames_optical'] for item in batch]
+        frames_original = [item['frames_original'] for item in batch]
+        motion_data = [item['motion_data'] for item in batch]
+        labels = [item['label'] for item in batch]
+        eeg_data = [item['eeg_data'] for item in batch]
         
         # 获取序列长度并创建mask
         lengths = [f.size(0) for f in frames_optical]
@@ -128,7 +120,8 @@ class CollateProcessor:
         motion_features_padded = pad_sequence(motion_features, batch_first=True)
         motion_features_normalized = self._normalize_features(motion_features_padded)
         
-        device = batch[0][0].device
+        # 获取设备信息
+        device = batch[0]['frames_optical'].device
 
         return BatchData(
             frames_optical=frames_optical_padded.to(device),
@@ -136,7 +129,8 @@ class CollateProcessor:
             motion_features=motion_features_normalized.to(device),
             motion_metadata=motion_metadata,
             labels=torch.stack(labels).to(device),
-            mask=mask.to(device)
+            mask=mask.to(device),
+            eeg_data=torch.stack(eeg_data).to(device)
         )
 
 class DeviceCollator:

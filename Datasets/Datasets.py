@@ -1,4 +1,4 @@
-from multiprocessing import Manager
+from multiprocessing import Manager # tag
 import os, sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -23,6 +23,9 @@ from DatasetsUtils import EnsureThreeChannels, DataPrefetcher, DeviceCollator, C
 import tarfile
 from DataClass import  DatasetConfig, MotionFeatureConfig
 from io import BytesIO
+import mne
+import tempfile
+import warnings
 
 class VRFrameDataset(Dataset):
     def __init__(
@@ -41,6 +44,65 @@ class VRFrameDataset(Dataset):
         self.tar_handles = {}
         self.frame_cache = LRUCache(cache_size)  # 添加LRU缓存
         self.transform_cache = Manager().dict()  # 使用共享字典
+        self.eeg_cache = {}  # 添加EEG缓存
+    def _load_eeg(self, tar_path: str, subject_id: str, slice_id: str) -> torch.Tensor:
+        """从tar文件加载EEG数据"""
+        cache_key = f"{tar_path}:{subject_id}:{slice_id}_eeg"
+        
+        if cache_key in self.eeg_cache:
+            return self.eeg_cache[cache_key]
+                
+        eeg_tar_path = os.path.join(self.root, 'EEGData', f"{subject_id}.tar")
+        
+        try:
+            if not os.path.exists(eeg_tar_path):
+                print(f"Warning: EEG tar file not found: {eeg_tar_path}")
+                return torch.zeros((64, 1000))
+                
+            if eeg_tar_path not in self.tar_handles:
+                try:
+                    self.tar_handles[eeg_tar_path] = tarfile.open(eeg_tar_path, 'r')
+                except Exception as e:
+                    print(f"Error opening tar file {eeg_tar_path}: {e}")
+                    return torch.zeros((64, 1000))
+                    
+            tar = self.tar_handles[eeg_tar_path]
+            
+            eeg_filename = f"{subject_id}_slice_{slice_id}.set"
+            try:
+                member = tar.getmember(eeg_filename)
+            except KeyError:
+                available_files = [
+                    m.name for m in tar.getmembers() 
+                    if m.name.startswith(f"{subject_id}_slice_")
+                ][:5]
+                print(f"Warning: EEG file {eeg_filename} not found in {eeg_tar_path}")
+                print(f"Available similar files: {available_files}...")
+                return torch.zeros((64, 1000))
+                
+            try:
+                # 创建临时目录
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # 提取.set和.fdt文件（如果存在）
+                    temp_set_path = os.path.join(temp_dir, eeg_filename)
+                    tar.extract(member, temp_dir)
+                    
+                    # 读取.set文件数据并转换为tensor
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        eeg_data = mne.io.read_raw_eeglab(temp_set_path, preload=True)
+                    eeg_tensor = torch.from_numpy(eeg_data.get_data())
+                    
+                    self.eeg_cache[cache_key] = eeg_tensor
+                    return eeg_tensor
+                
+            except Exception as e:
+                print(f"Error processing EEG file {eeg_filename}: {e}")
+                return torch.zeros((64, 1000))
+                
+        except Exception as e:
+            print(f"Unexpected error loading EEG data: {e}")
+            return torch.zeros((64, 1000))
 
     def _cached_transform(self, img_bytes: bytes, transform_name: str) -> torch.Tensor:
         """缓存基于图像字节和转换名称的转换结果"""
@@ -106,7 +168,19 @@ class VRFrameDataset(Dataset):
             frame_name = f"sub_{subject_id}_sclice_{slice_id}_frame_{i}_{self.frame_type}.png"
             frame = self._load_frame(tar_path, subject_id, slice_id, frame_name)
             frames.append(frame)
-        return torch.stack(frames)
+
+        # 加载EEG数据
+        eeg_data = self._load_eeg(tar_path, subject_id, slice_id)
+        
+        return {
+            'frames': torch.stack(frames),
+            'eeg_data': eeg_data,
+            'metadata': {
+                'subject_id': subject_id,
+                'slice_id': slice_id,
+                'frame_type': self.frame_type
+            }
+    }
     
     def __del__(self):
         """清理打开的tar文件"""
@@ -278,7 +352,7 @@ class VRMotionSicknessDataset(Dataset):
 
 
     @staticmethod
-    def _load_sample_static(subject_id: str, slice_id: str, root_dir: str, img_size: Tuple[int, int]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _load_sample_static(subject_id: str, slice_id: str, root_dir: str, img_size: Tuple[int, int]) -> Dict[str, torch.Tensor]:
         """优化的静态加载方法"""
         try:
             slice_id = slice_id[-1]
@@ -310,11 +384,37 @@ class VRMotionSicknessDataset(Dataset):
                         
                     except KeyError as e:
                         print(f"Warning: Missing frame {frame_idx} for {subject_id}_{slice_id}")
-                        # 使用零张量填充缺失帧
                         frames_optical.append(torch.zeros(3, *img_size))
                         frames_original.append(torch.zeros(3, *img_size))
             
-            return torch.stack(frames_optical), torch.stack(frames_original)
+            # 加载EEG数据
+            eeg_tar_path = os.path.join(root_dir, 'EEGData', f"{subject_id}.tar")
+            try:
+                with tarfile.open(eeg_tar_path, 'r') as tar:
+                    eeg_filename = f"{subject_id}_slice_{slice_id}.set"
+                    
+                    # 创建临时目录
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        # 提取.set文件
+                        member = tar.getmember(eeg_filename)
+                        temp_set_path = os.path.join(temp_dir, eeg_filename)
+                        tar.extract(member, temp_dir)
+                        
+                        # 读取EEG数据
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            eeg_data = mne.io.read_raw_eeglab(temp_set_path, preload=True)
+                        eeg_tensor = torch.from_numpy(eeg_data.get_data())
+                        
+            except Exception as e:
+                print(f"Warning: Error loading EEG data for {subject_id}_{slice_id}: {e}")
+                eeg_tensor = torch.zeros((64, 1000))  # 根据实际EEG数据维度调整
+            
+            return {
+                'frames_optical': torch.stack(frames_optical),
+                'frames_original': torch.stack(frames_original),
+                'eeg_data': eeg_tensor
+            }
             
         except Exception as e:
             print(f"Error loading sample {subject_id}_{slice_id}: {e}")
@@ -468,30 +568,44 @@ class VRMotionSicknessDataset(Dataset):
         except Exception as e:
             raise RuntimeError(f"Error processing image {img_path}: {e}")
     
-    def _load_frame_sequence(self, subject_id: str, slice_id: str) -> Tuple[torch.Tensor, torch.Tensor]:
-        """使用ImageFolder加载图像序列"""
+    def _load_frame_sequence(self, subject_id: str, slice_id: str) -> Dict[str, torch.Tensor]:
+        """使用ImageFolder加载图像序列和EEG数据"""
         # 从缓存获取
         cache_key = f"frames_{subject_id}_{slice_id}"
-        cached_frames = self.cache.get(cache_key)
+        cached_data = self.cache.get(cache_key)
         
-        if cached_frames is not None:
-            return cached_frames
+        if cached_data is not None:
+            frames_optical, frames_original, eeg_data = cached_data
+            return {
+                'frames_optical': frames_optical,
+                'frames_original': frames_original,
+                'eeg_data': eeg_data
+            }
         
         # 使用ImageFolder加载序列
-        optical_frames = self.optical_folder[(subject_id, slice_id)]
-        original_frames = self.original_folder[(subject_id, slice_id)]
+        optical_data = self.optical_folder[(subject_id, slice_id)]
+        original_data = self.original_folder[(subject_id, slice_id)]
         
-        if optical_frames is None or original_frames is None:
-            raise RuntimeError(f"Missing frames for subject {subject_id}, slice {slice_id}")
+        if optical_data is None or original_data is None:
+            raise RuntimeError(f"Missing data for subject {subject_id}, slice {slice_id}")
         
-        # 移动到指定设备并缓存
-        frames = (
-            optical_frames.to(self.device),
-            original_frames.to(self.device)
+        # 准备数据
+        frames_data = (
+            optical_data['frames'].to(self.device),
+            original_data['frames'].to(self.device),
+            optical_data['eeg_data'].to(self.device)
         )
-        self.cache.put(cache_key, frames)
         
-        return frames
+        # 存入缓存的是元组格式
+        self.cache.put(cache_key, frames_data)
+        
+        # 返回字典格式
+        return {
+            'frames_optical': frames_data[0],
+            'frames_original': frames_data[1],
+            'eeg_data': frames_data[2]
+        }
+    
 
 
     def clear_cache(self):
@@ -512,7 +626,10 @@ class VRMotionSicknessDataset(Dataset):
         slice_id = sample['slice_id']
         
         # 加载帧序列
-        frames_optical, frames_original = self._load_frame_sequence(subject_id, slice_id)
+        # frames_optical, frames_original = self._load_frame_sequence(subject_id, slice_id)
+
+        # 加载帧序列和EEG数据
+        sequence_data = self._load_frame_sequence(subject_id, slice_id)
         
         # 获取运动特征
         motion_cache_key = f"motion_{subject_id}_{slice_id}"
@@ -527,13 +644,21 @@ class VRMotionSicknessDataset(Dataset):
             'slice_id': slice_id,
             'motion_features': motion_features
         }
-        
+
         label_tensor = torch.tensor(sample['label'], dtype=torch.float32, device=self.device)
         
-        return frames_optical, frames_original, motion_data, label_tensor
+        # return frames_optical, frames_original, motion_data, label_tensor   
+
+        return {
+            'frames_optical': sequence_data['frames_optical'],
+            'frames_original': sequence_data['frames_original'],
+            'motion_data': motion_data,
+            'label': label_tensor,
+            'eeg_data': sequence_data['eeg_data']
+        }
 
 
-    def _update_cache(self, idx: int, data: tuple):
+    def _update_cache(self, idx: int, data: Dict[str, torch.Tensor]):
         """Update LRU cache"""
         if idx in self._cache:
             self._cache_keys.remove(idx)
@@ -542,11 +667,19 @@ class VRMotionSicknessDataset(Dataset):
             oldest = self._cache_keys.pop(0)
             del self._cache[oldest]
             
-        self._cache[idx] = data
+        # 转换为元组格式存储
+        cache_tuple = (
+            data['frames_optical'],
+            data['frames_original'],
+            data['eeg_data']
+        )
+        self._cache[idx] = cache_tuple
         self._cache_keys.append(idx)
-    
+        
     def __len__(self):
         return len(self.samples)
+    
+
 
 def get_vr_dataloader(
     dataset: VRMotionSicknessDataset,

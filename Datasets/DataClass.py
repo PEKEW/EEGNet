@@ -1,4 +1,4 @@
-import torch
+import torch  # tag
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -9,7 +9,8 @@ class BatchData:
     motion_features: torch.Tensor 
     motion_metadata: Dict[str, List]
     labels: torch.Tensor  
-    mask: torch.Tensor    
+    mask: torch.Tensor
+    eeg_data: torch.Tensor  # 新增EEG数据字段
 
 @dataclass
 class MotionFeatureConfig:
