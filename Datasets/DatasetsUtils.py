@@ -5,7 +5,9 @@ from typing import Union
 from DataClass import BatchData, MotionFeatureConfig
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
-from typing import List, Tuple
+from typing import List
+
+FPS = 30-1
 
 def set_device(tensor_or_module: Union[torch.Tensor, nn.Module], device: str) -> Union[torch.Tensor, nn.Module]:
     """将tensor或module移动到指定设备"""
@@ -24,28 +26,44 @@ class EnsureThreeChannels(nn.Module):
         return self.__class__.__name__ + '()'
     
 def move_to_device(batch: BatchData, device: str) -> BatchData:
-    """将 batch 数据移动到指定设备"""
-    return BatchData(
-        frames_optical=batch.frames_optical.to(device),
-        frames_original=batch.frames_original.to(device),
-        motion_features=batch.motion_features.to(device),
-        motion_metadata=batch.motion_metadata,
-        labels=batch.labels.to(device),
-        mask=batch.mask.to(device),
-        eeg_data=batch.eeg_data.to(device)
-    )
+    """将 batch 数据移动到指定设备 - 添加数据检查"""
+    try:
+        moved_batch = BatchData(
+            frames_optical=batch.frames_optical.to(device, non_blocking=True),
+            frames_original=batch.frames_original.to(device, non_blocking=True),
+            motion_features=batch.motion_features.to(device, non_blocking=True),
+            motion_metadata=batch.motion_metadata,
+            labels=batch.labels.to(device, non_blocking=True),
+            mask=batch.mask.to(device, non_blocking=True),
+            eeg_data=batch.eeg_data.to(device, non_blocking=True)
+        )
+        
+        # 添加数据验证
+        for field_name, tensor in moved_batch.__dict__.items():
+            if isinstance(tensor, torch.Tensor):
+                # if torch.isnan(tensor).any():
+                #     print(f"Warning: NaN values found in {field_name}")
+                # if torch.isinf(tensor).any():
+                #     print(f"Warning: Inf values found in {field_name}")
+                if (tensor == 0).all() and field_name != 'labels':
+                    print(f"Warning: All zeros in {field_name}")
+                    
+        return moved_batch
+    except Exception as e:
+        print(f"Error in move_to_device: {e}")
+        raise
 
 class CollateProcessor:
     def __init__(self, feature_config: Optional[MotionFeatureConfig] = None):
         self.feature_config = feature_config or MotionFeatureConfig()
         self.feature_stats = {}
-        
+
     def _extract_motion_features(self, motion_data: Dict) -> torch.Tensor:
-        """从运动数据中提取特征 - 优化版本"""
-        features = torch.zeros((30, len(self.feature_config.feature_names)), dtype=torch.float32)
+        """从运动数据中提取特征 - 添加值检查"""
+        features = torch.zeros((FPS, len(self.feature_config.feature_names)), dtype=torch.float32)
         motion_features = motion_data['motion_features']
         
-        for frame_idx in range(30):
+        for frame_idx in range(FPS):
             frame_key = f'frame_{frame_idx}'
             if frame_key not in motion_features:
                 continue
@@ -53,17 +71,27 @@ class CollateProcessor:
             for feat_idx, feature_name in enumerate(self.feature_config.feature_names):
                 value = frame_data.get(feature_name)
                 if isinstance(value, torch.Tensor):
-                    features[frame_idx, feat_idx] = value.item()
+                    # 确保值是有效的标量
+                    if value.numel() == 1 and not torch.isnan(value) and not torch.isinf(value):
+                        features[frame_idx, feat_idx] = value.item()
+                    else:
+                        print(f"Warning: Invalid value for feature {feature_name} at frame {frame_idx}")
+        
         return features
 
     
     def _normalize_features(self, features: torch.Tensor, update_stats: bool = True) -> torch.Tensor:
-        """标准化特征"""
+        """标准化特征 - 添加数据检查和调试信息"""
         if not self.feature_config.normalize:
             return features
             
         B, T, F = features.shape
         features_flat = features.reshape(-1, F)
+        
+        # 添加数据检查
+        if torch.isnan(features_flat).any() or torch.isinf(features_flat).any():
+            print("Warning: NaN or Inf values found in features before normalization")
+            features_flat = torch.nan_to_num(features_flat, nan=0.0, posinf=0.0, neginf=0.0)
         
         if update_stats:
             mean = features_flat.mean(dim=0)
@@ -80,6 +108,11 @@ class CollateProcessor:
         mean = self.feature_stats.get('mean', mean)
         std = self.feature_stats.get('std', std)
         std = torch.clamp(std, min=1e-6)
+        
+        # 检查统计量
+        if torch.isnan(mean).any() or torch.isnan(std).any():
+            print("Warning: NaN values in normalization statistics")
+            return features_flat.reshape(B, T, F)
         
         normalized = (features_flat - mean) / std
         return normalized.reshape(B, T, F)
