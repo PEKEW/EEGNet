@@ -58,21 +58,15 @@ def append(self, edge_idx, batch_size):
     return edge_idx_all.to(self.device), data_batch.to(self.device)
 
 def forward(self, x):
-    # todo len ？ 
-    batch_size = len(x)
-    print(f"debug info: batch size {batch_size}")
-    x = x.reshape(-1, x.shape[-1])
-    edge_idx, _ = self.append(self.edge_idx, batch_size)
-    edge_weight = torch.zeros((self.num_nodes, self.num_nodes), device=edge_idx.device)
-    edge_weight[self.xs.to(edge_weight.device), self.ys.to(edge_weight.device)] = self.edge_weight
-    # 对角化 和 reshape 重复:确保每个批次中的每个样本都使用相同的edge_weight值
-    edge_weight = edge_weight + edge_weight.transpose(1, 0) - torch.diag(edge_weight.diagonal())
-    edge_weight = edge_weight.reshape(-1).repeat(batch_size)
-    # shpe: (2, self.num_nodes*self.num_nodes*batchSize)  edge_weight: (self.num_nodes*self.num_nodes*batchSize,)
-    # 这样的形状包含图中所有的边 包括自环
-    x = self.conv1(x, edge_idx, edge_weight)
-    x = x.view((batch_size, self.num_nodes, -1))
+    batch_size = x.size(0)
+    edge_idx_batch, _ = self.append(self.edge_idx, batch_size)
+    edge_weight_batch = self.edge_weight.repeat(batch_size)
+    x = x.reshape(-1, x.size(-1))
+    x = self.conv1(x, edge_idx_batch, edge_weight_batch)
+    x = F.relu(x)
+    x = F.dropout(x, p=self.dropout, training=self.training)
+    x = x.reshape(batch_size, self.num_nodes, -1)
     x = self.conv2(x)
-    x = F.relu(x.squeeze(1))
+    x = x.squeeze(1)
     x = self.fc(x)
     return x

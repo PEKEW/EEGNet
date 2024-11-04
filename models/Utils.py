@@ -13,7 +13,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import math
-from typing import List
+from typing import List, Tuple
 
 def getDEFreature(rawData):
     raise NotImplementedError
@@ -280,7 +280,8 @@ def loadSrtDe():
     raise NotImplementedError
 
 
-def get_edge_weight(args) -> List[List[int], List[int]], List[List[float], List[float]]:
+def get_edge_weight() -> \
+    Tuple[List[List[int], List[int]], List[List[float], List[float]]]:
     """
     返回edge idx 和 edge weight
     edge 是二维数组，分别表示每个电极和彼此之间的连接
