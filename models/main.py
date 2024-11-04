@@ -23,7 +23,7 @@ def init():
     parser.add_argument('--cpu', default=False, type=str, help='use cpu')
     parser.add_argument('--earlyStop', default=20, type=int, help='early stop')
     parser.add_argument('--band', default=5, type=int, help='num of bands used')
-    parser.add_argument('--numNodes', default=32, type=int, help='num of nodes')
+    parser.add_argument('--num_nodes', default=32, type=int, help='num of nodes')
     parser.add_argument('--numEpochs', default=100, type=int, help='num of epochs')
     parser.add_argument('--l1Reg', default=0, type=float, help='l1 regularization')
     parser.add_argument('--l2Reg', default=0, type=float, help='l2 regularization')

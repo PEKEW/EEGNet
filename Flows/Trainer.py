@@ -10,11 +10,11 @@ from torch.utils.data import DataLoader
 from torch.utils.data import DataSet
 
 class Trainer(object):
-    def __init__(self, modelF, numNodes, numHiddens=400, numClasses=2,
+    def __init__(self, modelF, num_nodes, numHiddens=400, numClasses=2,
                 batchSize=256, numEpoch=50, lr=0.005, l1Reg=0, l2Reg=0, dp=0.5,
                 earlyStop=20, optimizer='Adam', device=torch.device('cpu'),
                 extention: dict=None):
-        self.nunmNodes = numNodes
+        self.nunmNodes = num_nodes
         self.numHiddens = numHiddens
         self.numEpoch = numEpoch
         self.numClasses = numClasses
@@ -70,8 +70,8 @@ class Trainer(object):
             
             Y = Y.cpu().detach().numpy()
             numCorrectPredict += np.sum(classPredict == Y)
-            L1Loss = self.l1Reg * l1RegLoss(self.model, only=['edgeWeight'])
-            L2Loss = self.l2Reg * l2RegLoss(self.model, exclude=['edgeWeight'])
+            L1Loss = self.l1Reg * l1RegLoss(self.model, only=['edge_weight'])
+            L2Loss = self.l2Reg * l2RegLoss(self.model, exclude=['edge_weight'])
             loss = EntropyLoss + L1Loss + L2Loss
 
             if mode == 'train':

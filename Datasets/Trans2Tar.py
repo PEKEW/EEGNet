@@ -1,3 +1,5 @@
+# todo resize to 256*256
+
 import os
 from pathlib import Path
 from tqdm import tqdm

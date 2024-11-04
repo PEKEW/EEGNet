@@ -13,6 +13,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import math
+from typing import List
 
 def getDEFreature(rawData):
     raise NotImplementedError
@@ -55,43 +56,43 @@ class NormalDataset(Dataset):
         y = np.array(self.label[index])
         return torch.from_numpy(x).to(self.device, dtype=torch.float32), torch.from_numpy(y).to(self.device, dtype=torch.int32)
 
-def maybeNumNodes(edgeIdx, numNodes=None):
-    return edgeIdx.max().item() + 1 if numNodes is None else numNodes
+def maybenum_nodes(edge_idx, num_nodes=None):
+    return edge_idx.max().item() + 1 if num_nodes is None else num_nodes
 
 
-def addRemainingSelfLoops(edgeIdx, edgeWeight=None, fillValue=1, numNodes=None):
+def addRemainingSelfLoops(edge_idx, edge_weight=None, fillValue=1, num_nodes=None):
     """添加自环 并返回更新的边索引和边权重
 
     Args:
-        edgeIdx (tensor): 边索引
-        edgeWeight (tensor, optional): 边权重. Defaults to None.
+        edge_idx (tensor): 边索引
+        edge_weight (tensor, optional): 边权重. Defaults to None.
         fillValue (int, optional): 填充值1表示默认填充2表示增强填充. Defaults to 1.
-        numNodes (int, optional): 节点数量. Defaults to None.
+        num_nodes (int, optional): 节点数量. Defaults to None.
 
     Returns:
         tensor tensor: 边索引 边权重
     """
-    # edgeWeight shape : (numNondes * numNodes*batchSize)
-    numNodes = maybeNumNodes(edgeIdx, numNodes)
-    row, col = edgeIdx
+    # edge_weight shape : (numNondes * num_nodes*batchSize)
+    num_nodes = maybenum_nodes(edge_idx, num_nodes)
+    row, col = edge_idx
     mask = row != col
     invMask = ~mask
 
-    loopWeight = torch.full((numNodes,), fillValue, dtype = None if edgeWeight is None else edgeWeight.dtype, device=edgeIdx.device)
-    if (edgeWeight is not None):
-        assert edgeWeight.numel() == edgeIdx.size(1)
-        remainingEdgeWeight = edgeWeight[invMask]
+    loopWeight = torch.full((num_nodes,), fillValue, dtype = None if edge_weight is None else edge_weight.dtype, device=edge_idx.device)
+    if (edge_weight is not None):
+        assert edge_weight.numel() == edge_idx.size(1)
+        remainingedge_weight = edge_weight[invMask]
 
-        if remainingEdgeWeight.numel() > 0:
-            loopWeight[row[invMask]] = remainingEdgeWeight
+        if remainingedge_weight.numel() > 0:
+            loopWeight[row[invMask]] = remainingedge_weight
         
-        edgeWeight = torch.cat([edgeWeight[mask], loopWeight], dim=0)
+        edge_weight = torch.cat([edge_weight[mask], loopWeight], dim=0)
     
-    loopIdx = torch.arange(0, numNodes, dtype=row.dtype, device=row.device)
+    loopIdx = torch.arange(0, num_nodes, dtype=row.dtype, device=row.device)
     loopIdx = loopIdx.unsqueeze(0).repeat(row.size(0), 1)
-    edgeIdx = torch.cat([edgeIdx[:, mask], loopIdx], dim=1)
+    edge_idx = torch.cat([edge_idx[:, mask], loopIdx], dim=1)
 
-    return edgeIdx, edgeWeight
+    return edge_idx, edge_weight
 
 class _SGConv(SGConv):
     def __init__(self, numFeatures, numClasses, K=1, cached=False, bias=True):
@@ -99,38 +100,38 @@ class _SGConv(SGConv):
         nn.init.xavier_normal_(self.lin.weight)
     
     @staticmethod
-    def norm(edgeIdx, numNodes, edgeWeight, improved=False, dtype=None):
+    def norm(edge_idx, num_nodes, edge_weight, improved=False, dtype=None):
         """对图的边权重进行归一化处理
 
         Args:
-            edgeIdx (tensor): 边索引
-            numNodes (int): 节点数量
-            edgeWeight (tensor): 边权重
+            edge_idx (tensor): 边索引
+            num_nodes (int): 节点数量
+            edge_weight (tensor): 边权重
             improved (bool, optional): 是否使用提升归一化. Defaults to False.
-            dtype (edgeWeight.dtype, optional): 数据类型. Defaults to None.
+            dtype (edge_weight.dtype, optional): 数据类型. Defaults to None.
 
         Returns:
             tensor tensor: 归一化的邻接矩阵
         """
-        if edgeWeight is None:
-            edgeWeight = torch.ones((edgeIdx.size(1), ), dtype=dtype, device=edgeIdx.device)
+        if edge_weight is None:
+            edge_weight = torch.ones((edge_idx.size(1), ), dtype=dtype, device=edge_idx.device)
         fillValue = 1 if not improved else 2
-        edgeIdx, edgeWeight = addRemainingSelfLoops(edgeIdx, edgeWeight, fillValue, numNodes)
-        row, col = edgeIdx
-        deg = scatter_add(torch.abs(edgeWeight), row, dim=0, dimSize=numNodes)
+        edge_idx, edge_weight = addRemainingSelfLoops(edge_idx, edge_weight, fillValue, num_nodes)
+        row, col = edge_idx
+        deg = scatter_add(torch.abs(edge_weight), row, dim=0, dimSize=num_nodes)
         degInvSqurt = deg.pow(-0.5) # 度矩阵归一化
         degInvSqurt[degInvSqurt == float('inf')] = 0 # 规范除0
         # 归一化邻接矩阵
-        return edgeIdx, degInvSqurt[row] * edgeWeight * degInvSqurt[col]
+        return edge_idx, degInvSqurt[row] * edge_weight * degInvSqurt[col]
     
-    def forward(self, x, edgeIdx, edgeWeight=None):
+    def forward(self, x, edge_idx, edge_weight=None):
 
         # 缓存加速
         if not self.cached or self.cachedResult is None:
-            edgeIdx, norm = self.norm(edgeIdx, x.size(0), edgeWeight, dtype=x.dtype)
+            edge_idx, norm = self.norm(edge_idx, x.size(0), edge_weight, dtype=x.dtype)
 
             for k in range(self.K):
-                x =self.propagate(edgeIdx, x=x, norm=norm)
+                x =self.propagate(edge_idx, x=x, norm=norm)
             self.cachedResult = x
         
         return self.lin(self.cachedResult)
@@ -279,27 +280,44 @@ def loadSrtDe():
     raise NotImplementedError
 
 
-def getEdgeWeight(args):
-    totalPart = '''Fp1 Fp2 Fz F3 F4 F7 F8 FC1 FC2 FC5 FC6 Cz C3 C4 T7 T8 CP1 CP2 CP5 CP6 Pz P3 P4 P7 P8 PO3 PO4 Oz O1 O2'''.split()
-    edgePosValue = np.load('./Models/pos.npy') * 100
-    edegeWeight = np.zeros([len(totalPart), len(totalPart)])
+def get_edge_weight(args) -> List[List[int], List[int]], List[List[float], List[float]]:
+    """
+    返回edge idx 和 edge weight
+    edge 是二维数组，分别表示每个电极和彼此之间的连接
+    edge idx 是一个二维数组 表示电极的索引
+    例如 edge_idx[0] = [0,1,2,3...]
+    edge_idx[1] = [0,1,2,3...]
+    edge_weight 是一个二维数组 表示电极之间的连接权重
+    两个电极如果是同一个 则连接权重为1
+    否则为两个电极之间的距离的平方
+    delta是一个常数，用于控制连接的稀疏程度
+    如果两个电极之间的距离的平方小于delta，则连接权重为0
+    否则为exp(-距离的平方/2) 这表示连接距离越远 权重越小 
+    为什么使用指数函数可能是因为更平滑的变形
+    """
+    # todo total part 是30个电极的名字
+    # todo 这个pos value 是用索引直接表示的 应该改成字典格式 or something else带语意的 更准确
+    total_part = '''Fp1 Fp2 Fz F3 F4 F7 F8 FC1 FC2 FC5 FC6 Cz C3 C4 T7 T8 CP1 CP2 CP5 CP6 Pz P3 P4 P7 P8 PO3 PO4 Oz O1 O2'''.split()
+    edge_pos_value = np.load('./Models/pos.npy') * 100
+    edge_weight = np.zeros([len(total_part), len(total_part)])
     delta = 2 # make the proportion fo non negligible connection exactly 20%
-    edgeIndex = [[], []]
-    for i in range(len((totalPart))):
-        for j in range(len(totalPart)):
-            edgeIndex[0].append(i)
-            edgeIndex[1].append(j)
+    edge_index = [[], []]
+    for i in range(len((total_part))):
+        for j in range(len(total_part)):
+            edge_index[0].append(i)
+            edge_index[1].append(j)
             if i == j:
-                edegeWeight[i][j] = 1
+                edge_weight[i][j] = 1
             else:
-                edegeWeight[i][j] = np.sum(
-                    [(edgePosValue[i][k] - edgePosValue[j][k]) ** 2 for k in range(2)]
+                edge_weight[i][j] = np.sum(
+                    [(edge_pos_value[i][k] - edge_pos_value[j][k]) ** 2 for k in range(2)]
                 )
-                if delta / edegeWeight[i][j] > 1:
-                    edegeWeight[i][j] = math.exp(-edegeWeight[i][j]/2)
+                if delta / edge_weight[i][j] > 1:
+                    edge_weight[i][j] = math.exp(-edge_weight[i][j]/2)
                 else:
-                    edegeWeight[i][j] = 0
-    return edgeIndex, edegeWeight
+                    # todo 很小的但不算1
+                    edge_weight[i][j] = 0
+    return edge_index, edge_weight
 
 def drawRes(args):
     csvName = 'subject_%s_vids_%s_valid_%s.csv' % (args.subjectsType, str(args.nVids), args.validMethod)

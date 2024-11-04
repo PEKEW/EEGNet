@@ -9,10 +9,10 @@ def getTrainer(args):
         deviceUsing = torch.device('cpu')
     else:
         deviceUsing = torch.device('cuda:%d' % args.deviceIndex)
-    edgeIndex, edgeWeight = Utils.getEdgeWeight(args)
+    edgeIndex, edge_weight = Utils.getedge_weight(args)
     return DGCNNTrainer(
             edgeIndex = edgeIndex,
-            edgeWeight = edgeWeight,
+            edge_weight = edge_weight,
             numClasses=args.numClasses,
             device=deviceUsing,
             numHiddens = args.numHiddens,
