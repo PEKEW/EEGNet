@@ -2,7 +2,6 @@ import torch # tag
 from typing import Optional, Dict
 from torch import nn
 from typing import Union
-from DataClass import BatchData, MotionFeatureConfig
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from typing import List

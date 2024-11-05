@@ -17,9 +17,9 @@ class DGCNN(nn.Module):
             edge_weight (tensor): edge matrix.
             edge_idx (tensor): edge index.
             numFeatures (int): number of features for each node/channel.
-            numHiddens (int): number of hidden dimensions.
-            numClasses (int): classes number.
-            numLayers (int): number of layers.
+            num_hiddens (int): number of hidden dimensions.
+            num_classes (int): classes number.
+            num_layers (int): number of layers.
             learnedge_weight (bool, optional): if edge weight is learnable. Defaults to True.
             dropout (float, optional): dropout. Defaults to 0.5.
         """
@@ -31,7 +31,7 @@ class DGCNN(nn.Module):
         edge_weight = edge_weight.reshape(self.num_nodes, self.num_nodes)[self.xs, self.ys]
         self.edge_weight = nn.Parameter(torch.Tensor(edge_weight).float(), requires_grad=learnable_edge_weight)
         self.dropout = dropout
-        self.conv1 = _SGConv(numFeatures=num_features, numClasses=num_hiddens, K=num_layers)
+        self.conv1 = _SGConv(numFeatures=num_features, num_classes=num_hiddens, K=num_layers)
         self.conv2 = nn.Conv1d(self.num_nodes, 1, 1)
         self.fc = nn.Linear(num_hiddens, num_classes)
     
@@ -40,7 +40,7 @@ def append(self, edge_idx, batch_size):
 
     Args:
         edge_idx (edge tensor): edge idx of graoh.
-        batchSize (int): size of one batch.
+        batch_size (int): size of one batch.
 
     Returns:
         edge_idxAll: edge of concated

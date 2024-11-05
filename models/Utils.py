@@ -1,5 +1,4 @@
 import json
-import hdf5storage as hdf5
 import time
 import copy
 import torch
@@ -8,41 +7,46 @@ import torch.nn.functional as F
 from torch_geometric.nn import SGConv
 from torch_scatter import scatter_add
 import numpy as np
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import math
 from typing import List, Tuple
+from itertools import product
+from Datasets.Datasets import VRSicknessDataset, InterSubjectSampler, ExtraSubjectSampler
+from Datasets.DatasetsUtils import SequenceCollator
+import models.trainer as Trainer
 
 def getDEFreature(rawData):
     raise NotImplementedError
 
 
-def getRange(args):
-    """get the range of hyperparameters / todo : using json file to make grid search
+def get_range(args):
+    # todo : using json file to make grid search
+    """get the range of hyperparameters
     """
     # file = open('./gridSearchConfig.json', 'r')
-    # task = str(args.subjectsType) + str(args.numClasses)
-    rangeDict = {
+    # task = str(args.subjects_type) + str(args.numClasses)
+    range_dict = {
         "lr": [args.lr],
-        "numHiddens": [args.numHiddens],
-        "l1Reg": [args.l1Reg],
-        "l2Reg": [args.l2Reg]
+        "num_hiddens": [args.num_hiddens],
+        "l1_reg": [args.l1_reg],
+        "l2_reg": [args.l2_reg]
     }
-    return rangeDict
+    return range_dict
 
 
 class Results(object):
     """results of the model
     """
     def __init__(self, args):
-        self.valAccFlods = np.zeros(args.nFloats)
-        self.subjectsScore = np.zeros(args.nSubs)
-        self.accFlodList = [0] * 10;
-        if args.subjectType == 'intra':
-            self.subjectsResults = np.zeros((args.nSubs, args.sec * args.nVids))
-            self.labelVal = np.zeros((args.nSubs, args.sec * args.nVids))
+        self.valAccFlods = np.zeros(args.n_flods)
+        self.subjectsScore = np.zeros(args.n_subs)
+        self.accflod_list = [0] * 10;
+        if args.subjects_type == 'intra':
+            self.subjectsResults = np.zeros((args.n_subs, args.sec * args.n_vids))
+            self.labelVal = np.zeros((args.n_subs, args.sec * args.n_vids))
 
 
 class NormalDataset(Dataset):
@@ -72,7 +76,7 @@ def addRemainingSelfLoops(edge_idx, edge_weight=None, fillValue=1, num_nodes=Non
     Returns:
         tensor tensor: 边索引 边权重
     """
-    # edge_weight shape : (numNondes * num_nodes*batchSize)
+    # edge_weight shape : (numNondes * num_nodes*batch_size)
     num_nodes = maybenum_nodes(edge_idx, num_nodes)
     row, col = edge_idx
     mask = row != col
@@ -139,7 +143,7 @@ class _SGConv(SGConv):
     def message(self, xJ, norm):
         return norm.view(-1, 1) * xJ
 
-def l1RegLoss(model, only=None, exclude=None):
+def l1_regLoss(model, only=None, exclude=None):
     """返回sqared L1正则化损失
     """
     totalLoss = 0
@@ -155,7 +159,7 @@ def l1RegLoss(model, only=None, exclude=None):
             if name not in exclude:
                 totalLoss += torch.sum(torch.abs(param))
     return totalLoss
-def l2RegLoss(predict, label):
+def l2_regLoss(predict, label):
     if type(predict) == np.ndarry:
         numSamples = predict.shape[0]
     elif type(predict) == list:
@@ -246,9 +250,9 @@ class GPUManager():
         return float(d['power.draw']) / d['power.limit']
     
 
-def drawRatio(modelPath, csvName, figName, cls=2):
+def drawRatio(model_path, csvName, figName, cls=2):
     nSub = 123
-    path = os.path.join(modelPath, csvName)
+    path = os.path.join(model_path, csvName)
     data = pd.read_csv(path)
     accList = np.array(data[['0']]) * 100
     accMean = np.mean(accList)
@@ -272,8 +276,8 @@ def drawRatio(modelPath, csvName, figName, cls=2):
     x_ = np.arange(0, y_.shape[0])
     plt.plot(x_, y_, linestyle='dashed', color='#808080')
 
-    plt.savefig(os.path.join(modelPath, figName + '.png'))
-    plt.savefig(os.path.join(modelPath, figName + '.eps'), format='eps')
+    plt.savefig(os.path.join(model_path, figName + '.png'))
+    plt.savefig(os.path.join(model_path, figName + '.eps'), format='eps')
     plt.clf()
 
 def loadSrtDe():
@@ -281,7 +285,7 @@ def loadSrtDe():
 
 
 def get_edge_weight() -> \
-    Tuple[List[List[int], List[int]], List[List[float], List[float]]]:
+    Tuple[str, List[List[int]], List[List[float]]]:
     """
     返回edge idx 和 edge weight
     edge 是二维数组，分别表示每个电极和彼此之间的连接
@@ -296,83 +300,87 @@ def get_edge_weight() -> \
     否则为exp(-距离的平方/2) 这表示连接距离越远 权重越小 
     为什么使用指数函数可能是因为更平滑的变形
     """
-    # todo total part 是30个电极的名字
-    # todo 这个pos value 是用索引直接表示的 应该改成字典格式 or something else带语意的 更准确
-    total_part = '''Fp1 Fp2 Fz F3 F4 F7 F8 FC1 FC2 FC5 FC6 Cz C3 C4 T7 T8 CP1 CP2 CP5 CP6 Pz P3 P4 P7 P8 PO3 PO4 Oz O1 O2'''.split()
-    edge_pos_value = np.load('./Models/pos.npy') * 100
+    total_part = '''Fp1 Fp2 Fz F3 F4 F7 F8 Fc1 Fc2 Fc5 Fc6 Cz C3 C4 T7 T8 Cp1 Cp2 Cp5 Cp6 Pz P3 P4 P7 P8 Po3 Po4 Oz O1 O2'''.split()
+    raw_pos_value = np.load('/home/pekew/code/EEGNet/models/pos.npy') * 100
+    # raw_pos_value 有32个位置，最后两个是参考电极 不用考虑
+    edge_pos_value = {
+        name: raw_pos_value[idx]
+        for idx, name in enumerate(total_part)
+    }
     edge_weight = np.zeros([len(total_part), len(total_part)])
-    delta = 2 # make the proportion fo non negligible connection exactly 20%
+    delta = 2
     edge_index = [[], []]
-    for i in range(len((total_part))):
-        for j in range(len(total_part)):
-            edge_index[0].append(i)
-            edge_index[1].append(j)
-            if i == j:
-                edge_weight[i][j] = 1
+
+    for (i, electrode1), (j, electrode2) in product(enumerate(total_part), enumerate(total_part)):
+        edge_index[0].append(i)
+        edge_index[1].append(j)
+
+        if i==j:
+            edge_weight[i][j] = 1
+        else:
+            pos1 = edge_pos_value[electrode1]
+            pos2 = edge_pos_value[electrode2]
+            edge_weight[i][j] = np.sum((pos1 - pos2) ** 2)
+
+            if delta / edge_weight[i][j] > 1:
+                edge_weight[i][j] = math.exp(-edge_weight[i][j] / 2)
             else:
-                edge_weight[i][j] = np.sum(
-                    [(edge_pos_value[i][k] - edge_pos_value[j][k]) ** 2 for k in range(2)]
-                )
-                if delta / edge_weight[i][j] > 1:
-                    edge_weight[i][j] = math.exp(-edge_weight[i][j]/2)
-                else:
-                    # todo 很小的但不算1
-                    edge_weight[i][j] = 0
-    return edge_index, edge_weight
+                edge_weight[i][j] = 1e-10
+    return total_part, edge_index, edge_weight
 
 def drawRes(args):
-    csvName = 'subject_%s_vids_%s_valid_%s.csv' % (args.subjectsType, str(args.nVids), args.validMethod)
-    drawRatio(args.modelPath, csvName, '%s_acc_%s_%s_%s' % (args.model, args.subjectsType, str(args.nVids), args.nowTime), cls=args.numClasses)
+    csvName = 'subject_%s_vids_%s_valid_%s.csv' % (args.subjects_type, str(args.n_vids), args.valid_method)
+    drawRatio(args.model_path, csvName, '%s_acc_%s_%s_%s' % (args.model, args.subjects_type, str(args.n_vids), args.nowTime), cls=args.numClasses)
 
 
 def printRes(args, result):
     subjectScore = result.subjectsScore
-    if args.subjectsType == 'intra':
+    if args.subjects_type == 'intra':
         subjectResults = result.subjectsResults
         labelVal = result.labelVal
-    print('acc mean: %.3f, std: %.3f' %(np.mean(result.accFlodList), np.std(result.accFlodList)))
+    print('acc mean: %.3f, std: %.3f' %(np.mean(result.accflod_list), np.std(result.accflod_list)))
 
-    if args.subjectsType == 'intra':
+    if args.subjects_type == 'intra':
         subjectScore = [np.sum(subjectResults[i, :] == labelVal[i, :]) 
-                    / subjectResults.shape[1] for i in range(0, args.nSubs)]
+                    / subjectResults.shape[1] for i in range(0, args.n_subs)]
     pd.DataFrame(subjectScore).to_csv(
-        os.path.join(args.modelPath, 
+        os.path.join(args.model_path, 
                     'subject_%s_vids_%s_valid_%s.csv' 
-                    % (args.subjectsType, str(args.nVids), args.validMethod)
+                    % (args.subjects_type, str(args.n_vids), args.valid_method)
                     )
     )
 
 
 def benchmark(args):
-    dataRootDir = args.dataRootDir
-    flodList = args.flodList
-    nSubs = args.nSubs
-    nPer = args.nPer
-    bandUsed = args.band
-    rangeDict = getRange(args)
-    newArgs = copy.deepcopy(args)
-    for flod in flodList:
+    data_root_dir = args.data_root_dir
+    flod_list = args.flod_list
+    n_subs = args.n_subs
+    n_per = args.n_per
+    band_used = args.band
+    range_dict = get_range(args)
+    new_args = copy.deepcopy(args)
+    for flod in flod_list:
         print('flod:', flod)
-        nowFlodDir = os.path.join(args.modelPath, 'subject_%s_vids_%s_flod_%s_valid_%s' % 
-                    (args.subjectsType, str(args.nVids), str(flod), args.validMethod))
-        os.makedirs(nowFlodDir)
+        now_flod_dir = os.path.join(args.model_path, 'subject_%s_vids_%s_flod_%s_valid_%s' % 
+                    (args.subjects_type, str(args.n_vids), str(flod), args.valid_method))
+        os.makedirs(now_flod_dir)
 
-        dataTrainAndVal, labelTrainAndVal, dataTest, labelTest, testSub, testList = dataPrepare(args, flod)
+        train_loader, val_loader = get_data_loaders(args, flod, mod=['eeg'])
 
-    numTrainAndVal = dataTrainAndVal.shape[0]
-    numTest = dataTest.shape[0]
+    train_num = len(train_loader.dataset)
+    val_num = len(val_loader.dataset)
 
-    paraResultDict = {}
-    bestParaDict = {}
+    para_result_dict = {}
+    best_para_dict = {}
 
 
-    bestParaDict.update(
+    best_para_dict.update(
         {
             'lr': 0,
-            'numHiddens': 0,
-            'l1Reg': 0,
-            'l2Reg': 0,
-            'numEpoch': 0
+            'num_hiddens': 0,
+            'l1_reg': 0,
+            'l2_reg': 0,
+            'num_epoch': 0
         }
     )
 
@@ -383,61 +391,52 @@ def benchmark(args):
 
     count = 0
 
-    for lr, numHiddens in zip(rangeDict["lr"], rangeDict["numHiddens"]):
-        for l1Reg, l2Reg in zip(rangeDict["l1Reg"], rangeDict["l2Reg"]):
+    for lr, num_hiddens in zip(range_dict["lr"], range_dict["num_hiddens"]):
+        for l1_reg, l2_reg in zip(range_dict["l1_reg"], range_dict["l2_reg"]):
             _statTime = time.time()
-            newArgs.lr = lr
-            newArgs.numHiddens = numHiddens
-            newArgs.l1Reg = l1Reg
-            newArgs.l2Reg = l2Reg
+            new_args.lr = lr
+            new_args.num_hiddens = num_hiddens
+            new_args.l1_reg = l1_reg
+            new_args.l2_reg = l2_reg
 
-            nowParaDir = os.path.join(
-                nowFlodDir, f'lr={lr}_numHiddens={numHiddens}_l1Reg={l1Reg}_l2Reg={l2Reg}'
+            now_para_dir = os.path.join(
+                now_flod_dir, f'lr={lr}_num_hiddens={num_hiddens}_l1_reg={l1_reg}_l2_reg={l2_reg}'
             )
-            os.makedirs(nowParaDir)
+            os.makedirs(now_para_dir)
             meanAccList = {
-                'val': [0 for i in range(args.numEpoch)],
-                'train': [0 for i in range(args.numEpoch)]
+                'val': [0 for i in range(args.num_epochs)],
+                'train': [0 for i in range(args.num_epochs)]
             }
 
-            for subFlod in range(3):
-                dataTrain, labelTrain, dataVal, labelVal = trainValSplit(
-                    args, flod, subFlod, dataTrainAndVal, labelTrainAndVal, testList
-                )
-                trainer = trainer.getTrainer(newArgs)
+            for sub_flod in range(3):
+                trainer = Trainer.get_trainer(new_args)
                 startTime = time.time()
-                trainer.train(dataTrain, labelTrain, dataVal, labelVal, subFlod, nowParaDir, reload=False, ndPredict=False)
-                jfile = open(nowParaDir + "/" + '_acc_and_loss.json', 'r')
+                trainer.train(dataTrain, labelTrain, dataVal, labelVal, sub_flod, now_para_dir, reload=False, ndPredict=False)
+                jfile = open(now_para_dir + "/" + '_acc_and_loss.json', 'r')
                 jdict = json.load(jfile)
                 evalNumCorrectList = jdict['evalNumCorrectList']
                 trainNumCorrectList = jdict['trainNumCorrectList']
-                for i in range(args.numEpoch):
+                for i in range(args.num_epochs):
                     meanAccList['val'][i] += evalNumCorrectList[i]
                     meanAccList['train'][i] += trainNumCorrectList[i]
                 endTime = time.time()
 
-                print(
-                    f'thread id: {args.threadID}, 
-                    flod: {flod}, subFlod: {subFlod}, 
-                    l2Reg: {l2Reg}, bestAcc: {jdict['bestAcc']}, 
-                    bestEpoch: {jdict['bestEpoch']}, 
-                    time consumed: {endTime - startTime}'
-                    )
+                print(f"thread id: {args.threadID}, flod: {flod}, subFlod: {sub_flod},  l2_reg: {l2_reg}, bestAcc: {jdict['bestAcc']},  bestEpoch: {jdict['bestEpoch']}, time consumed: {endTime - startTime}")
             nowBestEpoch = 0
             nowBestAcc = {'val':0, 'train': 0}
-            for i in range(args.numEpoch):
+            for i in range(args.num_epochs):
                 meanAccList['val'][i] /= numTrainAndVal
                 meanAccList['train'][i] /= 2 * numTrainAndVal
                 if meanAccList['val'][i] > nowBestAcc['val']:
                     nowBestAcc['val'] = meanAccList['val'][i]
                     nowBestAcc['train'] = meanAccList['train'][i]
                     nowBestEpoch = i
-                paraResultDict.update({
+                para_result_dict.update({
                     count: {
                         "lr": lr,
-                        "numHiddens": numHiddens,
-                        "l1Reg": l1Reg,
-                        "l2Reg": l2Reg,
+                        "num_hiddens": num_hiddens,
+                        "l1_reg": l1_reg,
+                        "l2_reg": l2_reg,
                         "nowBestAccTrain": nowBestAcc['train'],
                         "nowBestAccVal": nowBestAcc['val'],
                         "nowBestEpoch": nowBestEpoch
@@ -450,43 +449,43 @@ def benchmark(args):
                     'nowBestAccVal' : nowBestAcc['val'],
                     'nowBestEpoch': nowBestEpoch,
                     'lr': lr,
-                    'numHiddens': numHiddens,
-                    'l1Reg': l1Reg,
-                    'l2Reg': l2Reg,
+                    'num_hiddens': num_hiddens,
+                    'l1_reg': l1_reg,
+                    'l2_reg': l2_reg,
                     'timeConsumed': endTime - startTime
-                }, open(nowParaDir + 
+                }, open(now_para_dir + 
                         f'/flod_{flod}_meanAccAndLoss.json', 'w'))
             if nowBestAcc['val'] > bestAcc['val']:
                 bestAcc['val'] = nowBestAcc['val']
                 bestAcc['train'] = nowBestAcc['train']
-                bestParaDict.update({
+                best_para_dict.update({
                     'lr': lr,
-                    'numHiddens': numHiddens,
-                    'l1Reg': l1Reg,
-                    'l2Reg': l2Reg,
-                    'numEpoch': nowBestEpoch
+                    'num_hiddens': num_hiddens,
+                    'l1_reg': l1_reg,
+                    'l2_reg': l2_reg,
+                    'num_epochs': nowBestEpoch
                 })
-        print(f'flod: {flod} choosee para: {bestParaDict}, bestAccVal: {bestAcc["val"]}, bestAccTrain: {bestAcc["train"]}')
+        print(f'flod: {flod} choosee para: {best_para_dict}, bestAccVal: {bestAcc["val"]}, bestAccTrain: {bestAcc["train"]}')
 
-        newArgs.lr = bestParaDict['lr']
-        newArgs.numHiddens = bestParaDict['numHiddens']
-        newArgs.l1Reg = bestParaDict['l1Reg']
-        newArgs.l2Reg = bestParaDict['l2Reg']
-        newArgs.numEpoch = bestParaDict['numEpoch'] + 1
+        new_args.lr = best_para_dict['lr']
+        new_args.num_hiddens = best_para_dict['num_hiddens']
+        new_args.l1_reg = best_para_dict['l1_reg']
+        new_args.l2_reg = best_para_dict['l2_reg']
+        new_args.num_epochs = best_para_dict['num_epochs'] + 1
 
-        trainer = trainer.getTrainer(newArgs)
+        trainer = trainer.getTrainer(new_args)
         startTime = time.time()
 
         predsTrainAndVal, predsTest = trainer.train(
-            dataTrainAndVal, 
-            labelTrainAndVal, 
-            labelTest, 
+            data_train_and_val, 
+            label_train_and_val, 
+            label_test, 
             flod,
-            nowFlodDir, reload=False)
+            now_flod_dir, reload=False)
         
         endTime = time.time()
-        trainAdnValAcc = np.sum(predsTrainAndVal == labelTrainAndVal) / len(labelTrainAndVal)
-        testAcc = np.sum(predsTest == labelTest) / len(labelTest)
+        trainAdnValAcc = np.sum(predsTrainAndVal == label_train_and_val) / len(label_train_and_val)
+        testAcc = np.sum(predsTest == label_test) / len(label_test)
 
         print(f'--final test acc -- thread id: {args.threadID}, flod: {flod}, testAcc: {testAcc}, trainAndValAcc: {trainAdnValAcc}, time consumed: {endTime - startTime}')
         json.dump({
@@ -494,76 +493,104 @@ def benchmark(args):
             'trainAndValAcc': trainAdnValAcc,
             'testAcc': testAcc,
             'bestValAcc': bestAcc['val'],
-            'bestParaDict': bestParaDict,
-            'paraResultDict': paraResultDict,
+            'bestParaDict': best_para_dict,
+            'paraResultDict': para_result_dict,
             'timeConsumed': endTime - startTime
-        }, open(nowFlodDir + '/flod_{flod}_accAndLoss.json', 'w'))
+        }, open(now_flod_dir + '/flod_{flod}_accAndLoss.json', 'w'))
 
         subjectsResults = predsTest
-        if args.subjectsType == 'inter':
-            subjectsResults = predsTest.reshape(testSub.shape[0], -1)
-            labelTest = np.array(labelTest).reshape(testSub.shape[0], -1)
+        if args.subjects_type == 'inter':
+            subjectsResults = predsTest.reshape(test_sub.shape[0], -1)
+            label_test = np.array(label_test).reshape(test_sub.shape[0], -1)
             TestResult = [
-                np.sum(subjectsResults[i, :] == labelTest[i, :]) /
-                subjectsResults.shape[1] for i in range(0, testSub.shape[0])
+                np.sum(subjectsResults[i, :] == label_test[i, :]) /
+                subjectsResults.shape[1] for i in range(0, test_sub.shape[0])
             ]
             return (flod, testAcc, TestResult)
-        elif args.subjectsType == 'intra':
-            subjectsResults = subjectsResults.reshape(nSubs, -1)
-            labelTest = np.array(labelTest).reshape(nSubs, -1)
-            return (flod, testAcc, testList, subjectsResults, labelTest, paraResultDict)
+        elif args.subjects_type == 'intra':
+            subjectsResults = subjectsResults.reshape(n_subs, -1)
+            label_test = np.array(label_test).reshape(n_subs, -1)
+            return (flod, testAcc, test_list, subjectsResults, label_test, para_result_dict)
 
 
-
-def dataPrepare(args, fold):
-    dataRootDir = args.dataRootDir
-    flodList = args.flodList
-    nSubs = args.nSubs
-    nPer = args.nPer
-    bandUsed = args.band
-
-    dataDir = os.path.join(dataRootDir, 'test_flod%d.mat' % fold)
-    # todo what is de_lds
-    data = hdf5.loadmat(dataDir)['de_lds']
-    data, labelRepeat, nSamples = loadSrtDe(
-        data, True, False, 1, args.labelType
-    )
-    featureShape = int(data.shape[-1] / 30)
-    # label shape: 720 or 840
-    # 720 = 24 * 30
-    # 840 = 28 * 30
-    # 24\28 is the number of videos and 30 is sample rate
-    # data shape : (123, 720, 120 or 150 or 255 * 30)
-    # 720 = 24*30
-    # 120 = 4*30
-    # 30 is channel num
-    # 4 is band num
-
-    valSub = None
-    valList = None
-    if args.subjectType == 'inter':
-        if fold < args.nFlods - 1:
-            valSub = np.arange(nPer * fold, nPer * (fold + 1))
-        else:
-            valSub = np.arange(nPer * fold, nSubs)
-        trainSub = np.array(list(set(np.arange(nSubs)) - set(valSub)))
-        dataTrain = data[list(trainSub), :, :].reshape(-1, featureShape, 30).transpose([0, 2, 1])
-        dataVal = data[list(valSub), :, :].reshape(-1, featureShape, 30).transpose([0, 2, 1])
-        labelTrain = np.tile(labelRepeat, len(trainSub))
-        labelVal = np.tile(labelRepeat, len(valSub))
+def get_data_loaders(args, flod, mod = ['eeg']) -> Tuple[DataLoader]:
+    datasets = VRSicknessDataset(root_dir=args.root_dir, mod=mod)
+    all_subjects = sorted(set(sub_id for sub_id, _ in datasets.samples))
+    if args.subjects_type == 'inter':
+        train_sampler = InterSubjectSampler(datasets, flod, all_subjects, args.n_per, True)
+        val_sampler = InterSubjectSampler(datasets, flod, all_subjects, args.n_per, False)
     else:
-        valSeconds = 30 / args.nFolds
-        trainSeconds = 30 - valSeconds
-        dataList = np.arange(0, len(labelRepeat))
-        valListStart = np.arange(0, len(labelRepeat), 30) + int(valSeconds * fold)
-        valList = valListStart.copy()
-        for sec in range(1, int(valSeconds)):
-            valList = np.concatenate((valList, valListStart + sec)).astype(int)
-        trainList = np.array(list(set(dataList) - set(valList))).astype(int)
-        dataTrain = data[:, list(trainList), :].reshape(-1, featureShape, 30).transpose([0, 2, 1])
-        labelTrain = np.tile(labelRepeat[trainList], nSubs)
-        labelVal = np.tile(np.array(labelRepeat)[valList], nSubs)
-    return dataTrain, labelTrain, dataVal, labelVal,  valSub, valList
+        train_sampler = ExtraSubjectSampler(datasets, flod, all_subjects, args.n_per, True)
+        val_sampler = ExtraSubjectSampler(datasets, flod, all_subjects, args.n_per, False)
+    collator = SequenceCollator(sequence_length=None, padding_mode='zero')
+    train_loader = DataLoader(
+        datasets,
+        sampler=train_sampler,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        collate_fn=collator,
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=True if args.num_workers > 0 else False,
+        prefetch_factor=2 if args.num_workers > 0 else None,
+        drop_last=True
+    )
+    val_loader = DataLoader(
+        datasets,
+        sampler=val_sampler,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        collate_fn=collator,
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=True if args.num_workers > 0 else False,
+        prefetch_factor=2 if args.num_workers > 0 else None,
+        drop_last=True
+    )
+    return train_loader, val_loader
+
+
+# def data_prepare(args, fold, mod = ['eeg']) -> VRSicknessDataset:
+#     """返回datasets数据集 根据mod的不同返回不同的数据内容
+
+#     Args:
+#         mod (str, optional): List [ eeg | video | log ]. Defaults to 'eeg'.
+#     """
+#     data_root_dir = args.data_root_dir
+#     flod_list = args.flod_list
+#     n_subs = args.n_subs
+#     n_per = args.n_per
+#     band_used = args.band
+#     data = VRSicknessDataset(root_dir=args.root_dir, mod=mod)
+
+#     valSub = None
+#     valList = None
+#     if args.subjects_type == 'inter':
+#         val_start = args.n_per * fold
+#         val_end = args.n_per * (fold + 1) if fold < args.nFlods - 1 else args.n_subs
+#         val_sub = np.arange(val_start, val_end)
+#         train_sub = np.array(list(set(range(args.n_subs)) - set(val_sub)))
+#         train_indices = [idx for idx in range(len(data.samples)) 
+#                         if data.samples[idx][0] in train_sub]
+#         val_indices = [idx for idx in range(len(data.samples)) 
+#                       if data.samples[idx][0] in val_sub]
+        
+#         trainSub = np.array(list(set(np.arange(n_subs)) - set(valSub)))
+#         dataTrain = data[list(trainSub), :, :].reshape(-1, featureShape, 30).transpose([0, 2, 1])
+#         dataVal = data[list(valSub), :, :].reshape(-1, featureShape, 30).transpose([0, 2, 1])
+#         labelTrain = np.tile(labelRepeat, len(trainSub))
+#         labelVal = np.tile(labelRepeat, len(valSub))
+#     else:
+#         valSeconds = 30 / args.nFolds
+#         trainSeconds = 30 - valSeconds
+#         dataList = np.arange(0, len(labelRepeat))
+#         valListStart = np.arange(0, len(labelRepeat), 30) + int(valSeconds * fold)
+#         valList = valListStart.copy()
+#         for sec in range(1, int(valSeconds)):
+#             valList = np.concatenate((valList, valListStart + sec)).astype(int)
+#         trainList = np.array(list(set(dataList) - set(valList))).astype(int)
+#         dataTrain = data[:, list(trainList), :].reshape(-1, featureShape, 30).transpose([0, 2, 1])
+#         labelTrain = np.tile(labelRepeat[trainList], n_subs)
+#         labelVal = np.tile(np.array(labelRepeat)[valList], n_subs)
+#     return dataTrain, labelTrain, dataVal, labelVal,  valSub, valList
 
 
 def trainValSplit(args, flod, subFlod, dataTrainAndVal, labTrainAndVal, testList):

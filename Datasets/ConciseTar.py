@@ -51,22 +51,18 @@ class TarCompressor:
     def _process_subject(self, subject_id: str, tar_files: list):
         """处理单个subject的所有tar文件"""
         try:
-            # 为每个subject创建临时目录
             subject_temp_dir = self.temp_dir / subject_id
             subject_temp_dir.mkdir(exist_ok=True)
             
-            # 提取所有相关的tar文件
             for tar_file in tar_files:
                 self._extract_tar(tar_file, subject_temp_dir)
             
-            # 创建新的压缩tar
             output_path = self.output_dir / f"{subject_id}.tar.gz"
             self._create_new_tar(
                 list(subject_temp_dir.glob('*')), 
                 output_path
             )
             
-            # 清理临时文件
             shutil.rmtree(subject_temp_dir)
             
             with self.lock:
@@ -79,10 +75,8 @@ class TarCompressor:
     def compress(self):
         """执行压缩过程"""
         try:
-            # 确保输出目录存在
             self.output_dir.mkdir(parents=True, exist_ok=True)
             
-            # 收集所有tar文件并按subject分组
             subject_files = defaultdict(list)
             tar_files = list(self.source_dir.glob('*.tar'))
             
@@ -95,15 +89,12 @@ class TarCompressor:
             
             logger.info(f"Found {len(tar_files)} tar files for {len(subject_files)} subjects")
             
-            # 使用线程池处理每个subject
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # 创建任务列表
                 future_to_subject = {
                     executor.submit(self._process_subject, subject_id, files): subject_id
                     for subject_id, files in subject_files.items()
                 }
                 
-                # 使用tqdm显示进度
                 for future in tqdm(
                     future_to_subject,
                     total=len(future_to_subject),
@@ -116,7 +107,6 @@ class TarCompressor:
                         logger.error(f"Failed to process subject {subject_id}: {e}")
                         
         finally:
-            # 清理所有临时文件
             if self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir)
                 

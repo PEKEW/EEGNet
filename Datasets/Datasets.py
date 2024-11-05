@@ -4,7 +4,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 import warnings
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Sampler
 from PIL import Image
 import os
 import json
@@ -19,7 +19,39 @@ import torch
 from PIL import Image
 import torchvision.transforms as transforms
 import torch.multiprocessing as tmp
-from DatasetsUtils import SequenceCollator
+from Datasets.DatasetsUtils import SequenceCollator
+
+class InterSubjectSampler(Sampler):
+    """跨被试采样器"""
+    def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
+        self.dataset = dataset
+        self.fold = fold
+        self.sub_list = sub_list
+        self.n_subs = len(sub_list)
+        self.n_per = n_per
+        self.is_train = is_train
+        
+        val_start = n_per * fold
+        val_end = min(n_per * (fold + 1), self.n_subs)
+        val_subs = set(self.sub_list[val_start:val_end])
+        
+        self.indices = [
+            i for i, (sub_id, _) in enumerate(dataset.samples)
+            if (sub_id in val_subs) != is_train
+        ]
+    
+    def __iter__(self):
+        return iter(self.indices)
+    
+    def __len__(self):
+        return len(self.indices)
+
+
+class ExtraSubjectSampler(Sampler):
+    def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
+        pass
+    def __iter__(self):
+        raise NotImplementedError("ExtraSubjectSampler is not implemented yet.")
 
 
 class VRSicknessDataset(Dataset):
@@ -33,11 +65,12 @@ class VRSicknessDataset(Dataset):
     EEG_DIR_STR = 'EEGData'
     LABEL_DIR_STR = 'labels.json'
 
-    def __init__(self, root_dir, transform=None):
+    def __init__(self, root_dir, transform=None, mod:list=['eeg', 'video', 'log']):
         self.root_dir = Path(root_dir)
         self.frame_dir = self.root_dir / self.FRAME_DIR_STR
         self.eeg_dir = self.root_dir / self.EEG_DIR_STR
         self.transform = transform
+        self.mod = mod
         
         # 加载运动数据
         with open(self.root_dir / self.MOTION_LOG_PATH_STR, 'r') as f:
@@ -49,11 +82,10 @@ class VRSicknessDataset(Dataset):
             
         # 获取所有有效的样本
         self.samples = self._get_valid_samples()
-        self.eeg_data = {sub_id: {} for sub_id, _ in self.samples}
 
-        print("Loading all EEG data...")
-        self._load_all_eeg()
-        print("Done loading all EEG data.")
+        if 'eeg' in self.mod:
+            self.eeg_data = {sub_id: {} for sub_id, _ in self.samples}
+            self._load_all_eeg()
         
     def _get_valid_samples(self):
         """获取所有有效的样本对（sub_id, slice_id）"""
@@ -206,16 +238,16 @@ class VRSicknessDataset(Dataset):
         try:
             # 加载所有模态的数据
             print(f"Loading sample (sub_{sub_id}, slice_{slice_id})")
-            optical_frames, original_frames = self._load_frames(sub_id, slice_id)
-            motion_data = self._load_motion(sub_id, slice_id)
+            if 'video' in self.mod:
+                optical_frames, original_frames = self._load_frames(sub_id, slice_id)
+            else:
+                optical_frames, original_frames = None, None
+            if 'log' in self.mod:
+                motion_data = self._load_motion(sub_id, slice_id)
+            else:
+                motion_data = None
+
             labels = self._load_label(sub_id, slice_id)
-            
-            # 打印统计信息
-            print(f"\n{'='*50}")
-            print(f"Sample Statistics (sub_{sub_id}, slice_{slice_id}):")
-            print(f"{'='*50}")
-            print(self._compute_statistics(optical_frames, original_frames, self.eeg_data[sub_id][slice_id], motion_data))
-            print(f"\n{'='*50}\n")
             
             return {
                 'sub_id': sub_id,

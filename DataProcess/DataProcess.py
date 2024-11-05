@@ -383,6 +383,6 @@ if __name__ == '__main__':
     for directory in directories:
         dir_path = os.path.join(current_dir, directory)
         os.makedirs(dir_path, exist_ok=True)
-    # video_process_multi(data_clip_info)
+    video_process_multi(data_clip_info)
     log_process(data_clip_info)
     label_process()
