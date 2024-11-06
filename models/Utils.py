@@ -18,6 +18,23 @@ from Datasets.Datasets import VRSicknessDataset, InterSubjectSampler, ExtraSubje
 from Datasets.DatasetsUtils import SequenceCollator
 import models.trainer as Trainer
 
+def get_data_loaders_gender(args) -> Tuple[DataLoader]:
+    datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
+    def create_loader(sampler):
+        return DataLoader(
+            datasets,
+            batch_size=args.batch_size,
+            sampler=sampler,
+            num_workers=args.num_workers,
+            collate_fn=SequenceCollator(sequence_length=None, padding_mode='zero',include=['eeg']),
+            pin_memory=torch.cuda.is_available(),
+            persistent_workers=True if args.num_workers > 0 else False,
+            prefetch_factor=2 if args.num_workers > 0 else None,
+            drop_last=True
+        )
+    male_loader = create_loader(GenderSubjectSamplerMale(datasets))
+    female_loader = create_loader(GenderSubjectSamplerFemale(datasets))
+    return male_loader, female_loader
 
 
 def get_range(args):
@@ -432,32 +449,7 @@ def benchmark(args):
             return (fold, testAcc, test_list, subjectsResults, label_test, para_result_dict)
 
 
-def get_data_loaders_gender(args) -> Tuple[DataLoader]:
-    datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
-    male_sampler = GenderSubjectSamplerMale(datasets)
-    female_sampler = GenderSubjectSamplerFemale(datasets)
-    collator = SequenceCollator(sequence_length=None, padding_mode='zero', include = args.mod)
-    male_loader = DataLoader(
-        datasets,
-        sampler=male_sampler,
-        num_workers=args.num_workers,
-        collate_fn=collator,
-        pin_memory=torch.cuda.is_available(),
-        persistent_workers=True if args.num_workers > 0 else False,
-        prefetch_factor=2 if args.num_workers > 0 else None,
-        drop_last = True
-    )
-    female_loader = DataLoader(
-        datasets,
-        sampler=female_sampler,
-        num_workers=args.num_workers,
-        collate_fn=collator,
-        pin_memory=torch.cuda.is_available(),
-        persistent_workers=True if args.num_workers > 0 else False,
-        prefetch_factor=2 if args.num_workers > 0 else None,
-        drop_last=True
-    )
-    return male_loader, female_loader
+
 
 
 
