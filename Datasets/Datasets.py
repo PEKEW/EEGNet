@@ -26,10 +26,8 @@ class GenderSubjectSampler(Sampler):
     def __init__(self, dataset):
         self.dataset = dataset
         self.indices = []
-    
     def __iter__(self):
         return iter(self.indices)
-    
     def __len__(self):
         return len(self.indices)
 
@@ -37,7 +35,6 @@ class GenderSubjectSampler(Sampler):
 class GenderSubjectSamplerMale(GenderSubjectSampler):
     def __init__(self, dataset):
         super().__init__(dataset)
-
         self.indices = [
             i for i, (sub_id, _) in enumerate(dataset.samples)
             if (sub_id in self.male_sub_list)
@@ -45,7 +42,6 @@ class GenderSubjectSamplerMale(GenderSubjectSampler):
 class GenderSubjectSamplerFemale(GenderSubjectSampler):
     def __init__(self, dataset):
         super().__init__(dataset)
-
         self.indices = [
             i for i, (sub_id, _) in enumerate(dataset.samples)
             if (sub_id not in self.male_sub_list)
@@ -72,7 +68,6 @@ class InterSubjectSampler(Sampler):
     
     def __iter__(self):
         return iter(self.indices)
-    
     def __len__(self):
         return len(self.indices)
 
@@ -101,16 +96,10 @@ class VRSicknessDataset(Dataset):
         self.eeg_dir = self.root_dir / self.EEG_DIR_STR
         self.transform = transform
         self.mod = mod
-        
-        # 加载运动数据
         with open(self.root_dir / self.MOTION_LOG_PATH_STR, 'r') as f:
             self.motion_data = json.load(f)
-
-        # 加载标签
         with open(self.root_dir / self.LABEL_DIR_STR, 'r') as f:
             self.labels = json.load(f)
-            
-        # 获取所有有效的样本
         self.samples = self._get_valid_samples()
 
         if 'eeg' in self.mod:
@@ -208,25 +197,7 @@ class VRSicknessDataset(Dataset):
                 finally:
                     os.remove(f'/tmp/{set_name}')
 
-    def _load_eeg(self, sub_id, slice_id):
-        """加载EEG数据"""
-        tar_path = self.eeg_dir / f'{sub_id}.tar'
-        set_name = f'{sub_id}_slice_{slice_id}.set'
-        
-        with tarfile.open(tar_path, 'r') as tar:
-            # 提取.set文件到临时目录
-            tar.extract(set_name, path='/tmp')
-            
-        try:
-            # 读取EEG数据
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                raw = mne.io.read_raw_eeglab(f'/tmp/{set_name}', preload=True)
-            data = raw.get_data()
-            return torch.FloatTensor(data)
-        finally:
-            # 清理临时文件
-            os.remove(f'/tmp/{set_name}')
+
     
     def _load_motion(self, sub_id, slice_id):
         """加载运动数据"""
@@ -266,6 +237,7 @@ class VRSicknessDataset(Dataset):
         sub_id, slice_id = self.samples[idx]
         
         try:
+            # todo video -> optical, original
             if 'video' in self.mod:
                 optical_frames, original_frames = self._load_frames(sub_id, slice_id)
             else:

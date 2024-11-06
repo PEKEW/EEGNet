@@ -338,20 +338,22 @@ class DGCNNTrainer(Trainer):
                 for batch in group_loader_1:
                     optimizer1.zero_grad()
                     eeg_data = batch['eeg'].to(device, non_blocking=True)
-                    label = batch['label'].to(device, non_blocking=True)
+                    label = batch['label'].view(1).long().to(device, non_blocking=True)
                     output = model_group1(eeg_data)
                     loss = F.cross_entropy(output, label)
                     loss.backward()
                     optimizer1.step()
+                    print(f'Epoch {epoch+1}, Loss: {loss.item()}')
 
                 for batch in group_loader_2:
                     optimizer2.zero_grad()
                     eeg_data = batch['eeg'].to(device, non_blocking=True)
-                    label = batch['label'].to(device, non_blocking=True)
+                    label = batch['label'].view(1).long().to(device, non_blocking=True)
                     output = model_group2(eeg_data)
                     loss = F.cross_entropy(output, label)
                     loss.backward()
                     optimizer2.step()
+                    print(f'Epoch {epoch+1}, Loss: {loss.item()}')
                 
                 if (epoch + 1) % 10 == 0:
                     print(f'Epoch {epoch+1}, Loss: {loss.item()}')

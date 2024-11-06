@@ -8,6 +8,7 @@ from typing import List
 
 FPS = 30-1
 
+# todo 重写 这里要考虑不同长度的序列 而且要考虑不同的数据类型
 class SequenceCollator:
     def __init__(self, sequence_length=None, padding_mode='zero', include=['eeg','label','optical', 'original']):
         self.sequence_length = sequence_length
@@ -23,9 +24,9 @@ class SequenceCollator:
         if not batch:
             return []
         
-        max_motion_length = 0
-        max_optical_frame_length = 0
-        max_original_frame_length = 0
+        max_motion_length = 1
+        max_optical_frame_length = 1
+        max_original_frame_length = 1
         if 'motion' in self.include:
             max_motion_length = max(s['motion'].size(0) for s in batch)
         if 'optical' in self.include:
@@ -62,7 +63,7 @@ class SequenceCollator:
             # 处理label
             labels = sample['label']
             curr_length = labels.size(0)
-            if curr_length > max_motion_length:
+            if curr_length >= max_motion_length:
                 labels = labels[:max_motion_length]
             elif curr_length < max_motion_length:
                 pad_length = max_motion_length - curr_length

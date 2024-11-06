@@ -26,21 +26,21 @@ def add_remaining_self_loops(edge_idx, edge_weight=None, fillValue=1, num_nodes=
     num_nodes = maybe_num_nodes(edge_idx, num_nodes)
     row, col = edge_idx
     mask = row != col
-    invMask = ~mask
+    inv_mask = ~mask
 
-    loopWeight = torch.full((num_nodes,), fillValue, dtype = None if edge_weight is None else edge_weight.dtype, device=edge_idx.device)
+    loop_weight = torch.full((num_nodes,), fillValue, dtype = None if edge_weight is None else edge_weight.dtype, device=edge_idx.device)
     if (edge_weight is not None):
         assert edge_weight.numel() == edge_idx.size(1)
-        remaining_edge_weight = edge_weight[invMask]
+        remaining_edge_weight = edge_weight[inv_mask]
 
         if remaining_edge_weight.numel() > 0:
-            loopWeight[row[invMask]] = remaining_edge_weight
+            loop_weight[row[inv_mask]] = remaining_edge_weight
         
-        edge_weight = torch.cat([edge_weight[mask], loopWeight], dim=0)
+        edge_weight = torch.cat([edge_weight[mask], loop_weight], dim=0)
     
-    loopIdx = torch.arange(0, num_nodes, dtype=row.dtype, device=row.device)
-    loopIdx = loopIdx.unsqueeze(0).repeat(row.size(0), 1)
-    edge_idx = torch.cat([edge_idx[:, mask], loopIdx], dim=1)
+    loop_idx = torch.arange(0, num_nodes, dtype=row.dtype, device=row.device)
+    loop_idx = loop_idx.unsqueeze(0).repeat(2, 1)
+    edge_idx = torch.cat([edge_idx[:, mask], loop_idx], dim=1)
 
     return edge_idx, edge_weight
 
@@ -65,29 +65,29 @@ class _SGConv(SGConv):
         """
         if edge_weight is None:
             edge_weight = torch.ones((edge_idx.size(1), ), dtype=dtype, device=edge_idx.device)
-        fillValue = 1 if not improved else 2
-        edge_idx, edge_weight = add_remaining_self_loops(edge_idx, edge_weight, fillValue, num_nodes)
+        fill_value = 1 if not improved else 2
+        edge_idx, edge_weight = add_remaining_self_loops(edge_idx, edge_weight, fill_value, num_nodes)
         row, col = edge_idx
-        deg = scatter_add(torch.abs(edge_weight), row, dim=0, dimSize=num_nodes)
-        degInvSqurt = deg.pow(-0.5) # 度矩阵归一化
-        degInvSqurt[degInvSqurt == float('inf')] = 0 # 规范除0
+        deg = scatter_add(torch.abs(edge_weight), row, dim=0, dim_size=num_nodes)
+        deg_inv_squrt = deg.pow(-0.5) # 度矩阵归一化
+        deg_inv_squrt[deg_inv_squrt == float('inf')] = 0 # 规范除0
         # 归一化邻接矩阵
-        return edge_idx, degInvSqurt[row] * edge_weight * degInvSqurt[col]
+        return edge_idx, deg_inv_squrt[row] * edge_weight * deg_inv_squrt[col]
     
     def forward(self, x, edge_idx, edge_weight=None):
 
         # 缓存加速
-        if not self.cached or self.cachedResult is None:
-            edge_idx, norm = self.norm(edge_idx, x.size(0), edge_weight, dtype=x.dtype)
+        if not self.cached or self.cached_result is None:
+            edge_idx, edge_weight = self.norm(edge_idx, x.size(0), edge_weight, dtype=x.dtype)
 
             for k in range(self.K):
-                x =self.propagate(edge_idx, x=x, norm=norm)
-            self.cachedResult = x
+                x = self.propagate(edge_idx, x=x, edge_weight=edge_weight)
+            self.cached_result = x
         
-        return self.lin(self.cachedResult)
+        return self.lin(self.cached_result)
     
-    def message(self, xJ, norm):
-        return norm.view(-1, 1) * xJ
+    def message(self, x_j, edge_weight):
+        return edge_weight.view(-1, 1) * x_j
     
 
 class DGCNN(nn.Module):
@@ -140,15 +140,20 @@ class DGCNN(nn.Module):
         return edge_idx_all.to(self.device), data_batch.to(self.device)
 
     def forward(self, x):
-        batch_size = x.size(0)
-        edge_idx_batch, _ = self.append(self.edge_idx, batch_size)
-        edge_weight_batch = self.edge_weight.repeat(batch_size)
-        x = x.reshape(-1, x.size(-1))
-        x = self.conv1(x, edge_idx_batch, edge_weight_batch)
-        x = F.relu(x)
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = x.reshape(batch_size, self.num_nodes, -1)
+        batch_size = len(x)
+        x = x.reshape(-1, x.shape[-1])
+        edge_idx, data_batch = self.append(self.edge_idx, batch_size)
+        edge_weight = torch.zeros(
+            (self.num_nodes, self.num_nodes), device=edge_idx.device)
+        edge_weight[self.xs.to(edge_weight.device), self.ys.to(
+            edge_weight.device)] = self.edge_weight
+        edge_weight = edge_weight + \
+            edge_weight.transpose(1, 0) - torch.diag(edge_weight.diagonal())
+        edge_weight = edge_weight.reshape(-1).repeat(batch_size)
+        # edge_index: (2,self.num_nodes*self.num_nodes*batch_size)  edge_weight: (self.num_nodes*self.num_nodes*batch_size,)
+        x = self.conv1(x, edge_idx, edge_weight)
+        x = x.view((batch_size, self.num_nodes, -1))
         x = self.conv2(x)
-        x = x.squeeze(1)
+        x = F.relu(x.squeeze(1))
         x = self.fc(x)
         return x
