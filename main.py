@@ -6,21 +6,20 @@ import numpy as np
 import json
 import torch
 import Utils
-from models.Utils import Results, benchmark
+from models.Utils import Results, benchmark, get_data_loaders, get_data_loaders_gender
 import sys
 from Utils.test import test_working_directory
+import models.trainer as Trainer
 
 
 class Args:
     def __init__(self):
         self.root_dir = '/home/pekew/code/EEGNet/data'
         self.rand_seed = 42
-        self.train_flod = 'all'
+        self.train_fold = 'all'
         self.subjects_type = 'inter'
         self.valid_method = 'kfold'
         self.auto_device_count = 5
-        self.device_list = [0]
-        self.device_index = -1
         self.cpu = False
         self.early_stop = 20
         self.band = 30
@@ -36,14 +35,21 @@ class Args:
         self.num_classes = 2
         self.n_subs = 15
         self.num_workers = 8
+        self.num_features = 250
 
-        self.n_flods = None
+        self.n_folds = None
         self.n_per = None
         self.sec = None
         self.data_root_dir = None
         self.now_time = None
         self.model_path = None
         self.batch_size = 32
+
+        self.sub_list = None
+        self.mod = ['eeg']
+        self.group_mod = 'gender'
+        self.search = False
+
 
     def __getitem__(self, key):
         return getattr(self, key)
@@ -68,8 +74,8 @@ def init():
     torch.backends.cudnn.benchmark = False
 
     # 计算相关参数
-    config.n_flods = 3 if config.valid_method == 'kfold' else config.n_subs
-    # config.n_per = round(config.n_subs / config.n_flods)
+    config.n_folds = 3 if config.valid_method == 'kfold' else config.n_subs
+    # config.n_per = round(config.n_subs / config.n_folds)
     config.n_per = 5
     config.sec = 30
 
@@ -92,30 +98,38 @@ def init():
 
 
 def main(args):
-    return benchmark(args)
+    group1, group2 = None, None
+    if args.group_mod == 'gender':
+        group1, group2 = get_data_loaders_gender(args)
+    trainer = Trainer.get_trainer(args)
+    trainer.train_eeg_part(args, group1, group2)
+    
+    # return benchmark(args)
 
 if __name__ == '__main__':
     args = init()
-    if args.train_flod == 'all':
-        flod_list = np.arange(0, args.n_flods)
+    main(args)
+    exit()
+    if args.train_fold == 'all':
+        fold_list = np.arange(0, args.n_folds)
     else:
-        flod_list = [int(args.train_flod)]
+        fold_list = [int(args.train_fold)]
     result = Results(args)
     buc = []
     # gm = GPUManager()
     args.device_index = 0
-    for i in flod_list:
+    for i in fold_list:
         args_new = copy.deepcopy(args)
-        args_new.flod_list = [i]
+        args_new.fold_list = [i]
         buc.append(main(args_new))
     para_mean_result_dict = {}
     if args.subjects_type == 'inter':
         for tup in buc:
-            result.acc_flod_list[tup[0]] = tup[1]
+            result.acc_fold_list[tup[0]] = tup[1]
             result.subjectsScore[tup[2]] = tup[3]
     elif args.subjects_type == 'intra':
         for tup in buc:
-            result.acc_flod_list[tup[0]] = tup[1]
+            result.acc_fold_list[tup[0]] = tup[1]
             result.subjects_results[:, tup[2]] = tup[3]
             result.label_val[:, tup[2]] = tup[4]
     for tup in buc:

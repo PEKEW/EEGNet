@@ -1,3 +1,4 @@
+from typing import List
 import torch
 import models.Utils as mUtils
 import math
@@ -8,6 +9,8 @@ import random
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
+from models.DGCNN import DGCNN
+import copy
 
 def l1_reg_loss(model,only=None,exclude=None): 
     total_loss = 0
@@ -62,6 +65,15 @@ class Trainer(object):
         self.model = None
         self.num_features = None
         self.model_config_para = dict()
+
+
+    def init_optimizer(self, model):
+        if self.optimizer == 'Adam':
+            self.optimizer = torch.optim.Adam(
+                model.parameters(), lr=self.lr)
+        else:
+            self.optimizer = torch.optim.SGD(
+                model.parameters(), lr=self.lr)
 
     def do_epoch(self, data_loader, mode='eval', epoch_num=None, ret_predict=False):
         if mode == 'train':
@@ -297,11 +309,60 @@ class DGCNNTrainer(Trainer):
             num_nodes = edge_weight.shape[0]
         super(DGCNNTrainer, self).__init__(num_nodes, num_hiddens, num_classes, batch_size, num_epochs, lr, l1_reg, l2_reg, dropout, device)
 
-def get_trainer(args):
+    # todo do_epoch
+    def train_eeg_part(self, args, group_loader_1, group_loader_2):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model_group1 = DGCNN(
+                device=device,
+                num_nodes=30,
+                edge_weight=self.edge_weight,
+                edge_idx=self.edge_index,
+                num_features=args.num_features,
+                num_hiddens=args.num_hiddens,
+                num_classes=self.num_classes,
+                num_layers=args.num_layers,
+            )
+        model_group2 = copy.deepcopy(model_group1)
+        model_group1.to(device)
+        model_group2.to(device)
+        self.init_optimizer(model_group1)
+        optimizer1 = copy.deepcopy(self.optimizer)
+        self.init_optimizer(model_group2)
+        optimizer2 = copy.deepcopy(self.optimizer)
+        if not args.search:
+            print("")
+            print("group training")
+            for epoch in range(args.num_epochs):
+                model_group1.train()
+                model_group2.train()
+                for batch in group_loader_1:
+                    optimizer1.zero_grad()
+                    eeg_data = batch['eeg'].to(device, non_blocking=True)
+                    label = batch['label'].to(device, non_blocking=True)
+                    output = model_group1(eeg_data)
+                    loss = F.cross_entropy(output, label)
+                    loss.backward()
+                    optimizer1.step()
+
+                for batch in group_loader_2:
+                    optimizer2.zero_grad()
+                    eeg_data = batch['eeg'].to(device, non_blocking=True)
+                    label = batch['label'].to(device, non_blocking=True)
+                    output = model_group2(eeg_data)
+                    loss = F.cross_entropy(output, label)
+                    loss.backward()
+                    optimizer2.step()
+                
+                if (epoch + 1) % 10 == 0:
+                    print(f'Epoch {epoch+1}, Loss: {loss.item()}')
+        return model_group1, model_group2
+
+
+def get_trainer(args) -> DGCNNTrainer:
     if args.cpu == True:
         deviceUsing = torch.device('cpu')
     else:
-        deviceUsing = torch.device('cuda:%d' % args.device_index)
+        deviceUsing = torch.device('cuda')
     _, edge_index, edge_weight = mUtils.get_edge_weight()
     return DGCNNTrainer(
             edge_index = edge_index,

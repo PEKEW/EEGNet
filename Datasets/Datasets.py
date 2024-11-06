@@ -21,6 +21,36 @@ import torchvision.transforms as transforms
 import torch.multiprocessing as tmp
 from Datasets.DatasetsUtils import SequenceCollator
 
+class GenderSubjectSampler(Sampler):
+    male_sub_list = ['TYR', 'XSJ', 'CM', 'SHQ', 'LMH', 'LZX']
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self.indices = []
+    
+    def __iter__(self):
+        return iter(self.indices)
+    
+    def __len__(self):
+        return len(self.indices)
+
+
+class GenderSubjectSamplerMale(GenderSubjectSampler):
+    def __init__(self, dataset):
+        super().__init__(dataset)
+
+        self.indices = [
+            i for i, (sub_id, _) in enumerate(dataset.samples)
+            if (sub_id in self.male_sub_list)
+        ]
+class GenderSubjectSamplerFemale(GenderSubjectSampler):
+    def __init__(self, dataset):
+        super().__init__(dataset)
+
+        self.indices = [
+            i for i, (sub_id, _) in enumerate(dataset.samples)
+            if (sub_id not in self.male_sub_list)
+        ]
+
 class InterSubjectSampler(Sampler):
     """跨被试采样器"""
     def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
@@ -236,8 +266,6 @@ class VRSicknessDataset(Dataset):
         sub_id, slice_id = self.samples[idx]
         
         try:
-            # 加载所有模态的数据
-            print(f"Loading sample (sub_{sub_id}, slice_{slice_id})")
             if 'video' in self.mod:
                 optical_frames, original_frames = self._load_frames(sub_id, slice_id)
             else:
@@ -331,19 +359,19 @@ def train_loop(dataloader, model, device):
 
 
 
-if __name__ == "__main__":
-    # 设置多进程启动方法为 spawn
-    if tmp.get_start_method(allow_none=True) is None:
-        tmp.set_start_method('spawn')
+# if __name__ == "__main__":
+#     # 设置多进程启动方法为 spawn
+#     if tmp.get_start_method(allow_none=True) is None:
+#         tmp.set_start_method('spawn')
 
-    image_dir = "data/images"
-    eeg_dir = "data/eeg"
-    motion_dir = "data/motion"
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataloader = get_dataloader(
-        root_dir='/home/pekew/code/EEGNet/data',
-        batch_size=32,
-        sequence_length=None,  # 使用批次中最长序列长度
-        padding_mode='repeat')
+#     image_dir = "data/images"
+#     eeg_dir = "data/eeg"
+#     motion_dir = "data/motion"
+#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#     dataloader = get_dataloader(
+#         root_dir='/home/pekew/code/EEGNet/data',
+#         batch_size=32,
+#         sequence_length=None,  # 使用批次中最长序列长度
+#         padding_mode='repeat')
 
-    train_loop(dataloader, None, device)
+#     train_loop(dataloader, None, device)

@@ -14,12 +14,10 @@ import matplotlib.pyplot as plt
 import math
 from typing import List, Tuple
 from itertools import product
-from Datasets.Datasets import VRSicknessDataset, InterSubjectSampler, ExtraSubjectSampler
+from Datasets.Datasets import VRSicknessDataset, InterSubjectSampler, ExtraSubjectSampler, GenderSubjectSamplerMale, GenderSubjectSamplerFemale
 from Datasets.DatasetsUtils import SequenceCollator
 import models.trainer as Trainer
 
-def getDEFreature(rawData):
-    raise NotImplementedError
 
 
 def get_range(args):
@@ -27,7 +25,7 @@ def get_range(args):
     """get the range of hyperparameters
     """
     # file = open('./gridSearchConfig.json', 'r')
-    # task = str(args.subjects_type) + str(args.numClasses)
+    # task = str(args.subjects_type) + str(args.num_classes)
     range_dict = {
         "lr": [args.lr],
         "num_hiddens": [args.num_hiddens],
@@ -41,9 +39,9 @@ class Results(object):
     """results of the model
     """
     def __init__(self, args):
-        self.valAccFlods = np.zeros(args.n_flods)
+        self.valAccfolds = np.zeros(args.n_folds)
         self.subjectsScore = np.zeros(args.n_subs)
-        self.accflod_list = [0] * 10;
+        self.accfold_list = [0] * 10;
         if args.subjects_type == 'intra':
             self.subjectsResults = np.zeros((args.n_subs, args.sec * args.n_vids))
             self.labelVal = np.zeros((args.n_subs, args.sec * args.n_vids))
@@ -60,88 +58,12 @@ class NormalDataset(Dataset):
         y = np.array(self.label[index])
         return torch.from_numpy(x).to(self.device, dtype=torch.float32), torch.from_numpy(y).to(self.device, dtype=torch.int32)
 
-def maybenum_nodes(edge_idx, num_nodes=None):
-    return edge_idx.max().item() + 1 if num_nodes is None else num_nodes
 
 
-def addRemainingSelfLoops(edge_idx, edge_weight=None, fillValue=1, num_nodes=None):
-    """添加自环 并返回更新的边索引和边权重
 
-    Args:
-        edge_idx (tensor): 边索引
-        edge_weight (tensor, optional): 边权重. Defaults to None.
-        fillValue (int, optional): 填充值1表示默认填充2表示增强填充. Defaults to 1.
-        num_nodes (int, optional): 节点数量. Defaults to None.
 
-    Returns:
-        tensor tensor: 边索引 边权重
-    """
-    # edge_weight shape : (numNondes * num_nodes*batch_size)
-    num_nodes = maybenum_nodes(edge_idx, num_nodes)
-    row, col = edge_idx
-    mask = row != col
-    invMask = ~mask
 
-    loopWeight = torch.full((num_nodes,), fillValue, dtype = None if edge_weight is None else edge_weight.dtype, device=edge_idx.device)
-    if (edge_weight is not None):
-        assert edge_weight.numel() == edge_idx.size(1)
-        remainingedge_weight = edge_weight[invMask]
 
-        if remainingedge_weight.numel() > 0:
-            loopWeight[row[invMask]] = remainingedge_weight
-        
-        edge_weight = torch.cat([edge_weight[mask], loopWeight], dim=0)
-    
-    loopIdx = torch.arange(0, num_nodes, dtype=row.dtype, device=row.device)
-    loopIdx = loopIdx.unsqueeze(0).repeat(row.size(0), 1)
-    edge_idx = torch.cat([edge_idx[:, mask], loopIdx], dim=1)
-
-    return edge_idx, edge_weight
-
-class _SGConv(SGConv):
-    def __init__(self, numFeatures, numClasses, K=1, cached=False, bias=True):
-        super(_SGConv, self).__init__(numFeatures, numClasses, K, cached, bias)
-        nn.init.xavier_normal_(self.lin.weight)
-    
-    @staticmethod
-    def norm(edge_idx, num_nodes, edge_weight, improved=False, dtype=None):
-        """对图的边权重进行归一化处理
-
-        Args:
-            edge_idx (tensor): 边索引
-            num_nodes (int): 节点数量
-            edge_weight (tensor): 边权重
-            improved (bool, optional): 是否使用提升归一化. Defaults to False.
-            dtype (edge_weight.dtype, optional): 数据类型. Defaults to None.
-
-        Returns:
-            tensor tensor: 归一化的邻接矩阵
-        """
-        if edge_weight is None:
-            edge_weight = torch.ones((edge_idx.size(1), ), dtype=dtype, device=edge_idx.device)
-        fillValue = 1 if not improved else 2
-        edge_idx, edge_weight = addRemainingSelfLoops(edge_idx, edge_weight, fillValue, num_nodes)
-        row, col = edge_idx
-        deg = scatter_add(torch.abs(edge_weight), row, dim=0, dimSize=num_nodes)
-        degInvSqurt = deg.pow(-0.5) # 度矩阵归一化
-        degInvSqurt[degInvSqurt == float('inf')] = 0 # 规范除0
-        # 归一化邻接矩阵
-        return edge_idx, degInvSqurt[row] * edge_weight * degInvSqurt[col]
-    
-    def forward(self, x, edge_idx, edge_weight=None):
-
-        # 缓存加速
-        if not self.cached or self.cachedResult is None:
-            edge_idx, norm = self.norm(edge_idx, x.size(0), edge_weight, dtype=x.dtype)
-
-            for k in range(self.K):
-                x =self.propagate(edge_idx, x=x, norm=norm)
-            self.cachedResult = x
-        
-        return self.lin(self.cachedResult)
-    
-    def message(self, xJ, norm):
-        return norm.view(-1, 1) * xJ
 
 def l1_regLoss(model, only=None, exclude=None):
     """返回sqared L1正则化损失
@@ -168,11 +90,6 @@ def l2_regLoss(predict, label):
         label = np.array(label)
     
     return np.sum(predict == label) / numSamples if numSamples > 0 else 0
-
-def loadData(data):
-    raise NotImplementedError
-
-
 
 class GPUManager():
     # todo check if cuda is available
@@ -280,10 +197,6 @@ def drawRatio(model_path, csvName, figName, cls=2):
     plt.savefig(os.path.join(model_path, figName + '.eps'), format='eps')
     plt.clf()
 
-def loadSrtDe():
-    raise NotImplementedError
-
-
 def get_edge_weight() -> \
     Tuple[str, List[List[int]], List[List[float]]]:
     """
@@ -330,7 +243,7 @@ def get_edge_weight() -> \
 
 def drawRes(args):
     csvName = 'subject_%s_vids_%s_valid_%s.csv' % (args.subjects_type, str(args.n_vids), args.valid_method)
-    drawRatio(args.model_path, csvName, '%s_acc_%s_%s_%s' % (args.model, args.subjects_type, str(args.n_vids), args.nowTime), cls=args.numClasses)
+    drawRatio(args.model_path, csvName, '%s_acc_%s_%s_%s' % (args.model, args.subjects_type, str(args.n_vids), args.nowTime), cls=args.num_classes)
 
 
 def printRes(args, result):
@@ -338,7 +251,7 @@ def printRes(args, result):
     if args.subjects_type == 'intra':
         subjectResults = result.subjectsResults
         labelVal = result.labelVal
-    print('acc mean: %.3f, std: %.3f' %(np.mean(result.accflod_list), np.std(result.accflod_list)))
+    print('acc mean: %.3f, std: %.3f' %(np.mean(result.accfold_list), np.std(result.accfold_list)))
 
     if args.subjects_type == 'intra':
         subjectScore = [np.sum(subjectResults[i, :] == labelVal[i, :]) 
@@ -351,21 +264,26 @@ def printRes(args, result):
     )
 
 
+
+
+
+
+
 def benchmark(args):
     data_root_dir = args.data_root_dir
-    flod_list = args.flod_list
+    fold_list = args.fold_list
     n_subs = args.n_subs
     n_per = args.n_per
     band_used = args.band
     range_dict = get_range(args)
     new_args = copy.deepcopy(args)
-    for flod in flod_list:
-        print('flod:', flod)
-        now_flod_dir = os.path.join(args.model_path, 'subject_%s_vids_%s_flod_%s_valid_%s' % 
-                    (args.subjects_type, str(args.n_vids), str(flod), args.valid_method))
-        os.makedirs(now_flod_dir)
+    for fold in fold_list:
+        print('fold:', fold)
+        now_fold_dir = os.path.join(args.model_path, 'subject_%s_vids_%s_fold_%s_valid_%s' % 
+                    (args.subjects_type, str(args.n_vids), str(fold), args.valid_method))
+        os.makedirs(now_fold_dir)
 
-        train_loader, val_loader = get_data_loaders(args, flod, mod=['eeg'])
+        train_loader, val_loader = get_data_loaders(args, fold, mod=['eeg'])
 
     train_num = len(train_loader.dataset)
     val_num = len(val_loader.dataset)
@@ -400,36 +318,37 @@ def benchmark(args):
             new_args.l2_reg = l2_reg
 
             now_para_dir = os.path.join(
-                now_flod_dir, f'lr={lr}_num_hiddens={num_hiddens}_l1_reg={l1_reg}_l2_reg={l2_reg}'
+                now_fold_dir, f'lr={lr}_num_hiddens={num_hiddens}_l1_reg={l1_reg}_l2_reg={l2_reg}'
             )
             os.makedirs(now_para_dir)
-            meanAccList = {
+            mean_acc_list = {
                 'val': [0 for i in range(args.num_epochs)],
                 'train': [0 for i in range(args.num_epochs)]
             }
 
-            for sub_flod in range(3):
+            for sub_fold in range(3):
                 trainer = Trainer.get_trainer(new_args)
                 startTime = time.time()
-                trainer.train(dataTrain, labelTrain, dataVal, labelVal, sub_flod, now_para_dir, reload=False, ndPredict=False)
+                trainer.train(train_loader, val_loader, sub_fold, now_para_dir)
+                # trainer.train(dataTrain, labelTrain, dataVal, labelVal, sub_fold, now_para_dir, reload=False, ndPredict=False)
                 jfile = open(now_para_dir + "/" + '_acc_and_loss.json', 'r')
                 jdict = json.load(jfile)
                 evalNumCorrectList = jdict['evalNumCorrectList']
                 trainNumCorrectList = jdict['trainNumCorrectList']
                 for i in range(args.num_epochs):
-                    meanAccList['val'][i] += evalNumCorrectList[i]
-                    meanAccList['train'][i] += trainNumCorrectList[i]
+                    mean_acc_list['val'][i] += evalNumCorrectList[i]
+                    mean_acc_list['train'][i] += trainNumCorrectList[i]
                 endTime = time.time()
 
-                print(f"thread id: {args.threadID}, flod: {flod}, subFlod: {sub_flod},  l2_reg: {l2_reg}, bestAcc: {jdict['bestAcc']},  bestEpoch: {jdict['bestEpoch']}, time consumed: {endTime - startTime}")
+                print(f"thread id: {args.threadID}, fold: {fold}, subfold: {sub_fold},  l2_reg: {l2_reg}, bestAcc: {jdict['bestAcc']},  bestEpoch: {jdict['bestEpoch']}, time consumed: {endTime - startTime}")
             nowBestEpoch = 0
             nowBestAcc = {'val':0, 'train': 0}
             for i in range(args.num_epochs):
-                meanAccList['val'][i] /= numTrainAndVal
-                meanAccList['train'][i] /= 2 * numTrainAndVal
-                if meanAccList['val'][i] > nowBestAcc['val']:
-                    nowBestAcc['val'] = meanAccList['val'][i]
-                    nowBestAcc['train'] = meanAccList['train'][i]
+                mean_acc_list['val'][i] /= numTrainAndVal
+                mean_acc_list['train'][i] /= 2 * numTrainAndVal
+                if mean_acc_list['val'][i] > nowBestAcc['val']:
+                    nowBestAcc['val'] = mean_acc_list['val'][i]
+                    nowBestAcc['train'] = mean_acc_list['train'][i]
                     nowBestEpoch = i
                 para_result_dict.update({
                     count: {
@@ -444,7 +363,7 @@ def benchmark(args):
                 })
                 count += 1
                 json.dump({
-                    'flod': int(flod),
+                    'fold': int(fold),
                     'nowBestAccTrain': nowBestAcc['train'],
                     'nowBestAccVal' : nowBestAcc['val'],
                     'nowBestEpoch': nowBestEpoch,
@@ -454,7 +373,7 @@ def benchmark(args):
                     'l2_reg': l2_reg,
                     'timeConsumed': endTime - startTime
                 }, open(now_para_dir + 
-                        f'/flod_{flod}_meanAccAndLoss.json', 'w'))
+                        f'/fold_{fold}_meanAccAndLoss.json', 'w'))
             if nowBestAcc['val'] > bestAcc['val']:
                 bestAcc['val'] = nowBestAcc['val']
                 bestAcc['train'] = nowBestAcc['train']
@@ -465,7 +384,7 @@ def benchmark(args):
                     'l2_reg': l2_reg,
                     'num_epochs': nowBestEpoch
                 })
-        print(f'flod: {flod} choosee para: {best_para_dict}, bestAccVal: {bestAcc["val"]}, bestAccTrain: {bestAcc["train"]}')
+        print(f'fold: {fold} choosee para: {best_para_dict}, bestAccVal: {bestAcc["val"]}, bestAccTrain: {bestAcc["train"]}')
 
         new_args.lr = best_para_dict['lr']
         new_args.num_hiddens = best_para_dict['num_hiddens']
@@ -480,23 +399,23 @@ def benchmark(args):
             data_train_and_val, 
             label_train_and_val, 
             label_test, 
-            flod,
-            now_flod_dir, reload=False)
+            fold,
+            now_fold_dir, reload=False)
         
         endTime = time.time()
         trainAdnValAcc = np.sum(predsTrainAndVal == label_train_and_val) / len(label_train_and_val)
         testAcc = np.sum(predsTest == label_test) / len(label_test)
 
-        print(f'--final test acc -- thread id: {args.threadID}, flod: {flod}, testAcc: {testAcc}, trainAndValAcc: {trainAdnValAcc}, time consumed: {endTime - startTime}')
+        print(f'--final test acc -- thread id: {args.threadID}, fold: {fold}, testAcc: {testAcc}, trainAndValAcc: {trainAdnValAcc}, time consumed: {endTime - startTime}')
         json.dump({
-            'flod': int(flod),
+            'fold': int(fold),
             'trainAndValAcc': trainAdnValAcc,
             'testAcc': testAcc,
             'bestValAcc': bestAcc['val'],
             'bestParaDict': best_para_dict,
             'paraResultDict': para_result_dict,
             'timeConsumed': endTime - startTime
-        }, open(now_flod_dir + '/flod_{flod}_accAndLoss.json', 'w'))
+        }, open(now_fold_dir + '/fold_{fold}_accAndLoss.json', 'w'))
 
         subjectsResults = predsTest
         if args.subjects_type == 'inter':
@@ -506,22 +425,52 @@ def benchmark(args):
                 np.sum(subjectsResults[i, :] == label_test[i, :]) /
                 subjectsResults.shape[1] for i in range(0, test_sub.shape[0])
             ]
-            return (flod, testAcc, TestResult)
+            return (fold, testAcc, TestResult)
         elif args.subjects_type == 'intra':
             subjectsResults = subjectsResults.reshape(n_subs, -1)
             label_test = np.array(label_test).reshape(n_subs, -1)
-            return (flod, testAcc, test_list, subjectsResults, label_test, para_result_dict)
+            return (fold, testAcc, test_list, subjectsResults, label_test, para_result_dict)
 
 
-def get_data_loaders(args, flod, mod = ['eeg']) -> Tuple[DataLoader]:
+def get_data_loaders_gender(args) -> Tuple[DataLoader]:
+    datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
+    male_sampler = GenderSubjectSamplerMale(datasets)
+    female_sampler = GenderSubjectSamplerFemale(datasets)
+    collator = SequenceCollator(sequence_length=None, padding_mode='zero', include = args.mod)
+    male_loader = DataLoader(
+        datasets,
+        sampler=male_sampler,
+        num_workers=args.num_workers,
+        collate_fn=collator,
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=True if args.num_workers > 0 else False,
+        prefetch_factor=2 if args.num_workers > 0 else None,
+        drop_last = True
+    )
+    female_loader = DataLoader(
+        datasets,
+        sampler=female_sampler,
+        num_workers=args.num_workers,
+        collate_fn=collator,
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=True if args.num_workers > 0 else False,
+        prefetch_factor=2 if args.num_workers > 0 else None,
+        drop_last=True
+    )
+    return male_loader, female_loader
+
+
+
+
+def get_data_loaders(args, fold, mod = ['eeg']) -> Tuple[DataLoader]:
     datasets = VRSicknessDataset(root_dir=args.root_dir, mod=mod)
     all_subjects = sorted(set(sub_id for sub_id, _ in datasets.samples))
     if args.subjects_type == 'inter':
-        train_sampler = InterSubjectSampler(datasets, flod, all_subjects, args.n_per, True)
-        val_sampler = InterSubjectSampler(datasets, flod, all_subjects, args.n_per, False)
+        train_sampler = InterSubjectSampler(datasets, fold, all_subjects, args.n_per, True)
+        val_sampler = InterSubjectSampler(datasets, fold, all_subjects, args.n_per, False)
     else:
-        train_sampler = ExtraSubjectSampler(datasets, flod, all_subjects, args.n_per, True)
-        val_sampler = ExtraSubjectSampler(datasets, flod, all_subjects, args.n_per, False)
+        train_sampler = ExtraSubjectSampler(datasets, fold, all_subjects, args.n_per, True)
+        val_sampler = ExtraSubjectSampler(datasets, fold, all_subjects, args.n_per, False)
     collator = SequenceCollator(sequence_length=None, padding_mode='zero')
     train_loader = DataLoader(
         datasets,
@@ -546,52 +495,3 @@ def get_data_loaders(args, flod, mod = ['eeg']) -> Tuple[DataLoader]:
         drop_last=True
     )
     return train_loader, val_loader
-
-
-# def data_prepare(args, fold, mod = ['eeg']) -> VRSicknessDataset:
-#     """返回datasets数据集 根据mod的不同返回不同的数据内容
-
-#     Args:
-#         mod (str, optional): List [ eeg | video | log ]. Defaults to 'eeg'.
-#     """
-#     data_root_dir = args.data_root_dir
-#     flod_list = args.flod_list
-#     n_subs = args.n_subs
-#     n_per = args.n_per
-#     band_used = args.band
-#     data = VRSicknessDataset(root_dir=args.root_dir, mod=mod)
-
-#     valSub = None
-#     valList = None
-#     if args.subjects_type == 'inter':
-#         val_start = args.n_per * fold
-#         val_end = args.n_per * (fold + 1) if fold < args.nFlods - 1 else args.n_subs
-#         val_sub = np.arange(val_start, val_end)
-#         train_sub = np.array(list(set(range(args.n_subs)) - set(val_sub)))
-#         train_indices = [idx for idx in range(len(data.samples)) 
-#                         if data.samples[idx][0] in train_sub]
-#         val_indices = [idx for idx in range(len(data.samples)) 
-#                       if data.samples[idx][0] in val_sub]
-        
-#         trainSub = np.array(list(set(np.arange(n_subs)) - set(valSub)))
-#         dataTrain = data[list(trainSub), :, :].reshape(-1, featureShape, 30).transpose([0, 2, 1])
-#         dataVal = data[list(valSub), :, :].reshape(-1, featureShape, 30).transpose([0, 2, 1])
-#         labelTrain = np.tile(labelRepeat, len(trainSub))
-#         labelVal = np.tile(labelRepeat, len(valSub))
-#     else:
-#         valSeconds = 30 / args.nFolds
-#         trainSeconds = 30 - valSeconds
-#         dataList = np.arange(0, len(labelRepeat))
-#         valListStart = np.arange(0, len(labelRepeat), 30) + int(valSeconds * fold)
-#         valList = valListStart.copy()
-#         for sec in range(1, int(valSeconds)):
-#             valList = np.concatenate((valList, valListStart + sec)).astype(int)
-#         trainList = np.array(list(set(dataList) - set(valList))).astype(int)
-#         dataTrain = data[:, list(trainList), :].reshape(-1, featureShape, 30).transpose([0, 2, 1])
-#         labelTrain = np.tile(labelRepeat[trainList], n_subs)
-#         labelVal = np.tile(np.array(labelRepeat)[valList], n_subs)
-#     return dataTrain, labelTrain, dataVal, labelVal,  valSub, valList
-
-
-def trainValSplit(args, flod, subFlod, dataTrainAndVal, labTrainAndVal, testList):
-    raise NotImplementedError
