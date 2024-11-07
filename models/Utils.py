@@ -1,22 +1,14 @@
-import json
-import time
-import copy
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch_geometric.nn import SGConv
-from torch_scatter import scatter_add
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import math
 from typing import List, Tuple
 from itertools import product
-from Datasets.Datasets import VRSicknessDataset, InterSubjectSampler, ExtraSubjectSampler, GenderSubjectSamplerMale, GenderSubjectSamplerFemale
+from Datasets.Datasets import VRSicknessDataset, GenderSubjectSamplerMale, GenderSubjectSamplerFemale
 from Datasets.DatasetsUtils import SequenceCollator
-import models.trainer as Trainer
 
 def get_data_loaders_gender(args) -> Tuple[DataLoader]:
     datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
@@ -37,51 +29,6 @@ def get_data_loaders_gender(args) -> Tuple[DataLoader]:
     return male_loader, female_loader
 
 
-def get_range(args):
-    # todo : using json file to make grid search
-    """get the range of hyperparameters
-    """
-    # file = open('./gridSearchConfig.json', 'r')
-    # task = str(args.subjects_type) + str(args.num_classes)
-    range_dict = {
-        "lr": [args.lr],
-        "num_hiddens": [args.num_hiddens],
-        "l1_reg": [args.l1_reg],
-        "l2_reg": [args.l2_reg]
-    }
-    return range_dict
-
-
-class Results(object):
-    """results of the model
-    """
-    def __init__(self, args):
-        self.valAccfolds = np.zeros(args.n_folds)
-        self.subjectsScore = np.zeros(args.n_subs)
-        self.accfold_list = [0] * 10;
-        if args.subjects_type == 'intra':
-            self.subjectsResults = np.zeros((args.n_subs, args.sec * args.n_vids))
-            self.labelVal = np.zeros((args.n_subs, args.sec * args.n_vids))
-
-
-class NormalDataset(Dataset):
-    def __init__(self, data, label, device):
-        super(NormalDataset, self).__init__()
-        self.data = data
-        self.label = label
-        self.device = device
-    def __getitem__(self, index):
-        x = np.array(self.data[index])
-        y = np.array(self.label[index])
-        return torch.from_numpy(x).to(self.device, dtype=torch.float32), torch.from_numpy(y).to(self.device, dtype=torch.int32)
-
-
-
-
-
-
-
-
 def l1_regLoss(model, only=None, exclude=None):
     """返回sqared L1正则化损失
     """
@@ -98,6 +45,8 @@ def l1_regLoss(model, only=None, exclude=None):
             if name not in exclude:
                 totalLoss += torch.sum(torch.abs(param))
     return totalLoss
+
+
 def l2_regLoss(predict, label):
     if type(predict) == np.ndarry:
         numSamples = predict.shape[0]
@@ -108,83 +57,8 @@ def l2_regLoss(predict, label):
     
     return np.sum(predict == label) / numSamples if numSamples > 0 else 0
 
-class GPUManager():
-    # todo check if cuda is available
-    """gpu manager, list all available gpu devices, and auto choice the most free one
-    """
-    def __init__(self, qargs=[]):
-        self.qargs = qargs
-        self.gpus = self.queryGpu(qargs)
-        for gpu in self.gpus:
-            gpu['specified'] = False
-        self.gpu_num = len(self.gpus)
 
-    @staticmethod
-    def _sortByMemory(gpus, by_size=False):
-        if by_size:
-            print('Sorted by free memory size')
-            return sorted(gpus, key=lambda d: d['memory.free'], reverse=True)
-        else:
-            print('Sorted by free memory rate')
-            return sorted(gpus, key=lambda d: float(d['memory.free']) / d['memory.total'], reverse=True)
-
-    def _sortByPower(self, gpus):
-        return sorted(gpus, key=self.byPower)
-    
-
-    @staticmethod
-    def _sortByCustom(gpus, key, reverse=False, qargs=[]):
-        if isinstance(key, str) and (key in qargs):
-            return sorted(gpus, key=lambda d: d[key], reverse=reverse)
-        if isinstance(key, type(lambda a: a)):
-            return sorted(gpus, key=key, reverse=reverse)
-        raise ValueError("The argument 'key' must be a function or a key in query args,please read the documention of nvidia-smi")
-    
-
-    def autoChoice(self, mode=0):
-        for old_infos, new_infos in zip(self.gpus, self.queryGpu(self.qargs)):
-            old_infos.update(new_infos)
-        unspecified_gpus = [gpu for gpu in self.gpus if not gpu['specified']] or self.gpus
-        if mode == 0:
-            print('Choosing the GPU device has largest free memory...')
-            chosen_gpu = self._sortByMemory(unspecified_gpus, True)[0]
-        elif mode == 1:
-            print('Choosing the GPU device has highest free memory rate...')
-            chosen_gpu = self._sortByPower(unspecified_gpus)[0]
-        elif mode == 2:
-            print('Choosing the GPU device by custom...')
-            chosen_gpu = self._sortByCustom(unspecified_gpus, key=lambda d: d['memory.free'], reverse=True)
-        chosen_gpu['specified'] = True
-        index = chosen_gpu['index']
-        print(f'Choosing GPU device {index}...')
-        return int(index)
-
-    def queryGpu(self, qargs=[]):
-        qargs =['index','gpu_name', 'memory.free', 'memory.total', 'power.draw', 'power.limit']+ qargs
-        cmd = 'nvidia-smi --query-gpu={} --format=csv,noheader'.format(','.join(qargs))
-        results = os.popen(cmd).readlines()
-        return [self.parse(line,qargs) for line in results]
-
-    @staticmethod
-    def parse(line, qargs):
-        '''
-            解析一行nvidia-smi返回的csv格式文本
-        '''
-        numberic_args = ['memory.free', 'memory.total', 'power.draw', 'power.limit']#可计数的参数
-        power_manage_enable=lambda v:(not 'Not Support' in v)#lambda表达式，显卡是否滋瓷power management（笔记本可能不滋瓷）
-        to_numberic=lambda v:float(v.upper().strip().replace('MIB','').replace('W',''))#带单位字符串去掉单位
-        process = lambda k,v:((int(to_numberic(v)) if power_manage_enable(v) else 1) if k in numberic_args else v.strip())
-        return {k:process(k,v) for k,v in zip(qargs,line.strip().split(','))}
-    
-    @staticmethod
-    def byPower(d):
-        powerInfos = (d['power.draw'], d['power.limit'])
-        if any(v==1 for v in powerInfos):
-            return 1
-        return float(d['power.draw']) / d['power.limit']
-    
-
-def drawRatio(model_path, csvName, figName, cls=2):
+def draw_ratio(model_path, csvName, figName, cls=2):
     nSub = 123
     path = os.path.join(model_path, csvName)
     data = pd.read_csv(path)
@@ -258,12 +132,12 @@ def get_edge_weight() -> \
                 edge_weight[i][j] = 1e-10
     return total_part, edge_index, edge_weight
 
-def drawRes(args):
+def draw_res(args):
     csvName = 'subject_%s_vids_%s_valid_%s.csv' % (args.subjects_type, str(args.n_vids), args.valid_method)
-    drawRatio(args.model_path, csvName, '%s_acc_%s_%s_%s' % (args.model, args.subjects_type, str(args.n_vids), args.nowTime), cls=args.num_classes)
+    draw_ratio(args.model_path, csvName, '%s_acc_%s_%s_%s' % (args.model, args.subjects_type, str(args.n_vids), args.nowTime), cls=args.num_classes)
 
 
-def printRes(args, result):
+def print_res(args, result):
     subjectScore = result.subjectsScore
     if args.subjects_type == 'intra':
         subjectResults = result.subjectsResults
@@ -279,211 +153,3 @@ def printRes(args, result):
                     % (args.subjects_type, str(args.n_vids), args.valid_method)
                     )
     )
-
-
-
-
-
-
-
-def benchmark(args):
-    data_root_dir = args.data_root_dir
-    fold_list = args.fold_list
-    n_subs = args.n_subs
-    n_per = args.n_per
-    band_used = args.band
-    range_dict = get_range(args)
-    new_args = copy.deepcopy(args)
-    for fold in fold_list:
-        print('fold:', fold)
-        now_fold_dir = os.path.join(args.model_path, 'subject_%s_vids_%s_fold_%s_valid_%s' % 
-                    (args.subjects_type, str(args.n_vids), str(fold), args.valid_method))
-        os.makedirs(now_fold_dir)
-
-        train_loader, val_loader = get_data_loaders(args, fold, mod=['eeg'])
-
-    train_num = len(train_loader.dataset)
-    val_num = len(val_loader.dataset)
-
-    para_result_dict = {}
-    best_para_dict = {}
-
-
-    best_para_dict.update(
-        {
-            'lr': 0,
-            'num_hiddens': 0,
-            'l1_reg': 0,
-            'l2_reg': 0,
-            'num_epoch': 0
-        }
-    )
-
-    bestAcc = {
-        'val': 0,
-        'train': 0
-    }
-
-    count = 0
-
-    for lr, num_hiddens in zip(range_dict["lr"], range_dict["num_hiddens"]):
-        for l1_reg, l2_reg in zip(range_dict["l1_reg"], range_dict["l2_reg"]):
-            _statTime = time.time()
-            new_args.lr = lr
-            new_args.num_hiddens = num_hiddens
-            new_args.l1_reg = l1_reg
-            new_args.l2_reg = l2_reg
-
-            now_para_dir = os.path.join(
-                now_fold_dir, f'lr={lr}_num_hiddens={num_hiddens}_l1_reg={l1_reg}_l2_reg={l2_reg}'
-            )
-            os.makedirs(now_para_dir)
-            mean_acc_list = {
-                'val': [0 for i in range(args.num_epochs)],
-                'train': [0 for i in range(args.num_epochs)]
-            }
-
-            for sub_fold in range(3):
-                trainer = Trainer.get_trainer(new_args)
-                startTime = time.time()
-                trainer.train(train_loader, val_loader, sub_fold, now_para_dir)
-                # trainer.train(dataTrain, labelTrain, dataVal, labelVal, sub_fold, now_para_dir, reload=False, ndPredict=False)
-                jfile = open(now_para_dir + "/" + '_acc_and_loss.json', 'r')
-                jdict = json.load(jfile)
-                evalNumCorrectList = jdict['evalNumCorrectList']
-                trainNumCorrectList = jdict['trainNumCorrectList']
-                for i in range(args.num_epochs):
-                    mean_acc_list['val'][i] += evalNumCorrectList[i]
-                    mean_acc_list['train'][i] += trainNumCorrectList[i]
-                endTime = time.time()
-
-                print(f"thread id: {args.threadID}, fold: {fold}, subfold: {sub_fold},  l2_reg: {l2_reg}, bestAcc: {jdict['bestAcc']},  bestEpoch: {jdict['bestEpoch']}, time consumed: {endTime - startTime}")
-            nowBestEpoch = 0
-            nowBestAcc = {'val':0, 'train': 0}
-            for i in range(args.num_epochs):
-                mean_acc_list['val'][i] /= numTrainAndVal
-                mean_acc_list['train'][i] /= 2 * numTrainAndVal
-                if mean_acc_list['val'][i] > nowBestAcc['val']:
-                    nowBestAcc['val'] = mean_acc_list['val'][i]
-                    nowBestAcc['train'] = mean_acc_list['train'][i]
-                    nowBestEpoch = i
-                para_result_dict.update({
-                    count: {
-                        "lr": lr,
-                        "num_hiddens": num_hiddens,
-                        "l1_reg": l1_reg,
-                        "l2_reg": l2_reg,
-                        "nowBestAccTrain": nowBestAcc['train'],
-                        "nowBestAccVal": nowBestAcc['val'],
-                        "nowBestEpoch": nowBestEpoch
-                    }
-                })
-                count += 1
-                json.dump({
-                    'fold': int(fold),
-                    'nowBestAccTrain': nowBestAcc['train'],
-                    'nowBestAccVal' : nowBestAcc['val'],
-                    'nowBestEpoch': nowBestEpoch,
-                    'lr': lr,
-                    'num_hiddens': num_hiddens,
-                    'l1_reg': l1_reg,
-                    'l2_reg': l2_reg,
-                    'timeConsumed': endTime - startTime
-                }, open(now_para_dir + 
-                        f'/fold_{fold}_meanAccAndLoss.json', 'w'))
-            if nowBestAcc['val'] > bestAcc['val']:
-                bestAcc['val'] = nowBestAcc['val']
-                bestAcc['train'] = nowBestAcc['train']
-                best_para_dict.update({
-                    'lr': lr,
-                    'num_hiddens': num_hiddens,
-                    'l1_reg': l1_reg,
-                    'l2_reg': l2_reg,
-                    'num_epochs': nowBestEpoch
-                })
-        print(f'fold: {fold} choosee para: {best_para_dict}, bestAccVal: {bestAcc["val"]}, bestAccTrain: {bestAcc["train"]}')
-
-        new_args.lr = best_para_dict['lr']
-        new_args.num_hiddens = best_para_dict['num_hiddens']
-        new_args.l1_reg = best_para_dict['l1_reg']
-        new_args.l2_reg = best_para_dict['l2_reg']
-        new_args.num_epochs = best_para_dict['num_epochs'] + 1
-
-        trainer = trainer.getTrainer(new_args)
-        startTime = time.time()
-
-        predsTrainAndVal, predsTest = trainer.train(
-            data_train_and_val, 
-            label_train_and_val, 
-            label_test, 
-            fold,
-            now_fold_dir, reload=False)
-        
-        endTime = time.time()
-        trainAdnValAcc = np.sum(predsTrainAndVal == label_train_and_val) / len(label_train_and_val)
-        testAcc = np.sum(predsTest == label_test) / len(label_test)
-
-        print(f'--final test acc -- thread id: {args.threadID}, fold: {fold}, testAcc: {testAcc}, trainAndValAcc: {trainAdnValAcc}, time consumed: {endTime - startTime}')
-        json.dump({
-            'fold': int(fold),
-            'trainAndValAcc': trainAdnValAcc,
-            'testAcc': testAcc,
-            'bestValAcc': bestAcc['val'],
-            'bestParaDict': best_para_dict,
-            'paraResultDict': para_result_dict,
-            'timeConsumed': endTime - startTime
-        }, open(now_fold_dir + '/fold_{fold}_accAndLoss.json', 'w'))
-
-        subjectsResults = predsTest
-        if args.subjects_type == 'inter':
-            subjectsResults = predsTest.reshape(test_sub.shape[0], -1)
-            label_test = np.array(label_test).reshape(test_sub.shape[0], -1)
-            TestResult = [
-                np.sum(subjectsResults[i, :] == label_test[i, :]) /
-                subjectsResults.shape[1] for i in range(0, test_sub.shape[0])
-            ]
-            return (fold, testAcc, TestResult)
-        elif args.subjects_type == 'intra':
-            subjectsResults = subjectsResults.reshape(n_subs, -1)
-            label_test = np.array(label_test).reshape(n_subs, -1)
-            return (fold, testAcc, test_list, subjectsResults, label_test, para_result_dict)
-
-
-
-
-
-
-
-def get_data_loaders(args, fold, mod = ['eeg']) -> Tuple[DataLoader]:
-    datasets = VRSicknessDataset(root_dir=args.root_dir, mod=mod)
-    all_subjects = sorted(set(sub_id for sub_id, _ in datasets.samples))
-    if args.subjects_type == 'inter':
-        train_sampler = InterSubjectSampler(datasets, fold, all_subjects, args.n_per, True)
-        val_sampler = InterSubjectSampler(datasets, fold, all_subjects, args.n_per, False)
-    else:
-        train_sampler = ExtraSubjectSampler(datasets, fold, all_subjects, args.n_per, True)
-        val_sampler = ExtraSubjectSampler(datasets, fold, all_subjects, args.n_per, False)
-    collator = SequenceCollator(sequence_length=None, padding_mode='zero')
-    train_loader = DataLoader(
-        datasets,
-        sampler=train_sampler,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        collate_fn=collator,
-        pin_memory=torch.cuda.is_available(),
-        persistent_workers=True if args.num_workers > 0 else False,
-        prefetch_factor=2 if args.num_workers > 0 else None,
-        drop_last=True
-    )
-    val_loader = DataLoader(
-        datasets,
-        sampler=val_sampler,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        collate_fn=collator,
-        pin_memory=torch.cuda.is_available(),
-        persistent_workers=True if args.num_workers > 0 else False,
-        prefetch_factor=2 if args.num_workers > 0 else None,
-        drop_last=True
-    )
-    return train_loader, val_loader

@@ -1,10 +1,4 @@
-import torch # tag
-from typing import Optional, Dict
-from torch import nn
-from typing import Union
-from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import pad_sequence
-from typing import List
+import torch
 
 
 FPS = 30-1
@@ -60,52 +54,50 @@ class SequenceCollator:
         processed_batch.update({k: [] for k in self.include})
 
         for sample in batch:
-            processed_batch['sub_id'].append(sample['sub_id'])
-            processed_batch['slice_id'].append(sample['slice_id'])
-
-            # 处理label 使用最长的key序列长度
-            for key in max_length.key():
-                _data = sample[key]
-                processed_batch[key].append(
-                    self._pad_sequence(
-                        sample['label'],
-                        max_length[key],
-                        sample['labels'].size()[1:])
-                )
-                processed_batch['lengths'].append(sample[key].size(0))
-
-            # 处理数据
-            # todo sample 的key调整: optical_frames -> optical ..
+            # processed_batch['sub_id'].append(sample['sub_id'])
+            # processed_batch['slice_id'].append(sample['slice_id'])
             for key in self.include:
-                _data = sample[key]
-                processed_batch[key].append(
-                    self._pad_sequence(
-                        _data,
-                        max_length[key],
-                        _data.size()[1:])
-                )
+                processed_batch[key].append(sample[key])
 
+        #     # 处理label 使用最长的key序列长度
+        #     for key in max_length.keys():
+        #         _data = sample[key]
+        #         processed_batch['label'].append(
+        #             self._pad_sequence(
+        #                 sample['label'],
+        #                 max_length[key],
+        #                 sample['label'].size()[1:])
+        #         )
+        #         processed_batch['lengths'].append(sample[key].size(0))
+
+        #     # 处理数据
+        #     # todo sample 的key调整: optical_frames -> optical ..
+        #     for key in self.include:
+        #         _data = sample[key]
+        #         processed_batch[key].append(
+        #             self._pad_sequence(
+        #                 _data,
+        #                 max_length[key],
+        #                 _data.size()[1:])
+        #         )
+
+
+        # if processed_batch['lengths']:
+        #     result['lengths'] = torch.tensor(processed_batch['lengths'])
+        #     result['label'] = torch.stack(processed_batch['label'])
+        
         result = {
             'sub_id': processed_batch['sub_id'],
             'slice_id': processed_batch['slice_id'],
         }
+        result['lengths'] = torch.tensor(processed_batch['lengths'])
+        result['label'] = torch.stack(processed_batch['label'])
 
-        if processed_batch['lengths']:
-            result['lengths'] = torch.tensor(processed_batch['lengths'])
-            result['label'] = torch.stack(processed_batch['label'])
-        
         for key in self.include:
-            if key in max_length:
-                result[key] = torch.stack(processed_batch[key])
+            result[key] = torch.stack(processed_batch[key])
+        
+        # for key in self.include:
+        #     if key in max_length.keys():
+        #         result[key] = torch.stack(processed_batch[key])
 
         return result
-
-class EnsureThreeChannels(nn.Module):
-    """确保图像是三通道的自定义转换类"""
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.shape[0] == 1:
-            return x.repeat(3, 1, 1)
-        return x
-    
-    def __repr__(self) -> str:
-        return self.__class__.__name__ + '()'

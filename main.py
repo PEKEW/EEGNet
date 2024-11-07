@@ -1,9 +1,26 @@
+import torch
 import Utils
+import Utils.Config
 from models.Utils import get_data_loaders_gender
 import models.trainer as Trainer
+from models.DGCNN import DGCNN
+
+
+def get_model(args, edge_wight, edge_idx):
+    return DGCNN(
+        device=torch.device('cuda' if not args.cpu else 'cpu'),
+        num_nodes=args.num_nodes,
+        edge_weight=edge_wight,
+        edge_idx=edge_idx,
+        num_features=args.num_features,
+        num_classes=args.num_classes,
+        num_hiddens=args.num_hiddens,
+        num_layers=args.num_layers,
+    )
 
 
 def main(args):
+    device = torch.device('cuda' if not args.cpu else 'cpu')
     print("="*50)
     print("训练正则化图")
     group1, group2 = None, None
@@ -12,13 +29,27 @@ def main(args):
     else:
         # todo  random
         raise ValueError("不支持的分组方法")
-    trainer = Trainer.get_trainer(args)
-    trainer.train_eeg_part(args, group1, group2)
+    group1_trainer = Trainer.get_trainer(args)
+    group2_trainer = Trainer.get_trainer(args)
+    group1_trainer._set_data_loader(group1)
+    group2_trainer._set_data_loader(group2)
+    model_group1 = get_model(args, group1_trainer.edge_weight, group1_trainer.edge_index).to(device)
+    model_group2 = get_model(args, group2_trainer.edge_weight, group2_trainer.edge_index).to(device)
+    group1_trainer._set_model(model_group1)
+    group2_trainer._set_model(model_group2)
+    group1_trainer.init_optimizer()
+    group2_trainer.init_optimizer()
+    for i in range(args.num_epochs):
+        print(f"Epoch {i}")
+        group1_epoch_metrics = group1_trainer._train_with_eeg(args, i)
+        group2_epoch_metrics = group2_trainer._train_with_eeg(args, i)
+        print(f"Group1: {group1_epoch_metrics}")
+        print(f"Group2: {group2_epoch_metrics}")
     print("="*50)
     # return benchmark(args)
 
 if __name__ == '__main__':
-    args = Utils.init()
+    args = Utils.Config.init()
     main(args)
     exit()
 

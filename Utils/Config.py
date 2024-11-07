@@ -29,6 +29,7 @@ class Args:
         self.num_workers = 8
         self.num_features = 250
         self.batch_size = 32
+        self.clip_norm = 20
         self.mod = ['eeg'] # 数据集加载的模态: 可选项: eeg | optical | original | motion
         self.group_mod = 'gender' # 正则化图的分组方法: 可选项: gender | random
         self.n_folds = None
