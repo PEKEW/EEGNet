@@ -54,8 +54,9 @@ class SequenceCollator:
         processed_batch.update({k: [] for k in self.include})
 
         for sample in batch:
-            # processed_batch['sub_id'].append(sample['sub_id'])
-            # processed_batch['slice_id'].append(sample['slice_id'])
+            processed_batch['sub_id'].append(sample['sub_id'])
+            processed_batch['slice_id'].append(sample['slice_id'])
+            processed_batch['label'].append(sample['label'])
             for key in self.include:
                 processed_batch[key].append(sample[key])
 

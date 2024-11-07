@@ -1,9 +1,7 @@
 import torch
 import models.Utils as mUtils
 import numpy as np
-import os
-import time
-
+from torch.nn import functional as F
 
 def l1_reg_loss(model,only=None,exclude=None): 
     total_loss = 0
@@ -163,6 +161,10 @@ class DGCNNTrainer(Trainer):
         epoch_metrics['acc'] = num_correct_predict / total_samples
 
         return epoch_metrics
+    
+    def get_model(self):
+        self.model = self.model.eval()
+        return self.model
 
 
 def get_trainer(args) -> DGCNNTrainer:

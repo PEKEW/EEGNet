@@ -150,7 +150,6 @@ class DGCNN(nn.Module):
         edge_weight = edge_weight + \
             edge_weight.transpose(1, 0) - torch.diag(edge_weight.diagonal())
         edge_weight = edge_weight.reshape(-1).repeat(batch_size)
-        # edge_index: (2,self.num_nodes*self.num_nodes*batch_size)  edge_weight: (self.num_nodes*self.num_nodes*batch_size,)
         x = self.conv1(x, edge_idx, edge_weight)
         x = x.view((batch_size, self.num_nodes, -1))
         x = self.conv2(x)

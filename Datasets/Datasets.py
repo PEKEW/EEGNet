@@ -20,10 +20,15 @@ from PIL import Image
 import torchvision.transforms as transforms
 import torch.multiprocessing as tmp
 from Datasets.DatasetsUtils import SequenceCollator
+import random
 
 class GenderSubjectSampler(Sampler):
-    male_sub_list = ['TYR', 'XSJ', 'CM', 'SHQ', 'LMH', 'LZX']
-    def __init__(self, dataset):
+    male_sub_list = ['TYR', 'XSJ', 'CM', 'SHQ', 'LMH', 'LZX', 'LJ', 'WZT']
+    female_sub_list = ['TX', 'HZ', 'GKW', 'LMH', 'WJX', 'CGW', 'YHY', 'LZY']
+    def __init__(self, dataset, strategy = 'down'):
+        """
+            strategy (str, optional): down | up. Defaults to 'down'.
+        """
         self.dataset = dataset
         self.indices = []
     def __iter__(self):
@@ -33,19 +38,56 @@ class GenderSubjectSampler(Sampler):
 
 
 class GenderSubjectSamplerMale(GenderSubjectSampler):
-    def __init__(self, dataset):
-        super().__init__(dataset)
-        self.indices = [
-            i for i, (sub_id, _) in enumerate(dataset.samples)
-            if (sub_id in self.male_sub_list)
+    def __init__(self, dataset, strategy = 'down'):
+        super().__init__(dataset, strategy=strategy)
+        positive_indices = [
+            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
+            if (sub_id in self.male_sub_list) and (dataset.label[sub_id][f"slice_{slice_id}"] == 1)
         ]
+        negative_indices = [
+            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
+            if (sub_id in self.male_sub_list) and (dataset.label[sub_id][f"slice_{slice_id}"] == 0)
+        ]
+        pos_size = len(positive_indices)
+        neg_size = len(negative_indices)
+        target_size = max(pos_size, neg_size) if strategy == 'up' else min(pos_size, neg_size)
+        if pos_size > target_size:
+            positive_indices = random.sample(positive_indices, target_size)
+        elif pos_size < target_size:
+            positive_indices = random.choices(positive_indices, k=target_size)
+        if neg_size > target_size:
+            negative_indices = random.sample(negative_indices, target_size)
+        elif neg_size < target_size:
+            negative_indices = random.choices(negative_indices, k=target_size)
+
+        self.indices = positive_indices + negative_indices
+        random.shuffle(self.indices)
+
 class GenderSubjectSamplerFemale(GenderSubjectSampler):
-    def __init__(self, dataset):
-        super().__init__(dataset)
-        self.indices = [
-            i for i, (sub_id, _) in enumerate(dataset.samples)
-            if (sub_id not in self.male_sub_list)
+    def __init__(self, dataset, strategy = 'down'):
+        super().__init__(dataset, strategy=strategy)
+        positive_indices = [
+            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
+            if (sub_id in self.female_sub_list) and (dataset.label[sub_id][f"slice_{slice_id}"] == 1)
         ]
+        negative_indices = [
+            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
+            if (sub_id in self.female_sub_list) and (dataset.label[sub_id][f"slice_{slice_id}"] == 0)
+        ]
+        pos_size = len(positive_indices)
+        neg_size = len(negative_indices)
+        target_size = max(pos_size, neg_size) if strategy == 'up' else min(pos_size, neg_size)
+        if pos_size > target_size:
+            positive_indices = random.sample(positive_indices, target_size)
+        elif pos_size < target_size:
+            positive_indices = random.choices(positive_indices, k=target_size)
+        if neg_size > target_size:
+            negative_indices = random.sample(negative_indices, target_size)
+        elif neg_size < target_size:
+            negative_indices = random.choices(negative_indices, k=target_size)
+
+        self.indices = positive_indices + negative_indices
+        random.shuffle(self.indices)
 
 class InterSubjectSampler(Sampler):
     """跨被试采样器"""

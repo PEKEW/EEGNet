@@ -88,8 +88,6 @@ def draw_ratio(model_path, csvName, figName, cls=2):
     plt.savefig(os.path.join(model_path, figName + '.eps'), format='eps')
     plt.clf()
 
-def get_edge_weight() -> \
-    Tuple[str, List[List[int]], List[List[float]]]:
     """
     返回edge idx 和 edge weight
     edge 是二维数组，分别表示每个电极和彼此之间的连接
@@ -104,6 +102,8 @@ def get_edge_weight() -> \
     否则为exp(-距离的平方/2) 这表示连接距离越远 权重越小 
     为什么使用指数函数可能是因为更平滑的变形
     """
+def get_edge_weight() -> \
+    Tuple[str, List[List[int]], List[List[float]]]:
     total_part = '''Fp1 Fp2 Fz F3 F4 F7 F8 Fc1 Fc2 Fc5 Fc6 Cz C3 C4 T7 T8 Cp1 Cp2 Cp5 Cp6 Pz P3 P4 P7 P8 Po3 Po4 Oz O1 O2'''.split()
     raw_pos_value = np.load('/home/pekew/code/EEGNet/models/pos.npy') * 100
     # raw_pos_value 有32个位置，最后两个是参考电极 不用考虑
@@ -129,7 +129,10 @@ def get_edge_weight() -> \
             if delta / edge_weight[i][j] > 1:
                 edge_weight[i][j] = math.exp(-edge_weight[i][j] / 2)
             else:
-                edge_weight[i][j] = 1e-10
+                pos1 = edge_pos_value[electrode1]
+                pos2 = edge_pos_value[electrode2]
+                dist = np.sum((pos1 - pos2) ** 2)
+                edge_weight[i][j] = math.exp(-dist / (2 * delta))  # 使用高斯核
     return total_part, edge_index, edge_weight
 
 def draw_res(args):

@@ -16,12 +16,12 @@ class Args:
         self.early_stop = 20
         self.band = 30 # 频带数
         self.num_nodes = self.band
-        self.num_epochs = 100
+        self.num_epochs = 50
         self.l1_reg = 0.001
         self.l2_reg = 0.001
         self.lr = 0.001
         self.dropout = 0.5
-        self.num_hiddens = 900
+        self.num_hiddens = 90
         self.num_layers = 2
         self.n_vids = 24
         self.num_classes = 2
