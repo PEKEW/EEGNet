@@ -9,6 +9,126 @@ from typing import List, Tuple
 from itertools import product
 from Datasets.Datasets import VRSicknessDataset, GenderSubjectSamplerMale, GenderSubjectSamplerFemale
 from Datasets.DatasetsUtils import SequenceCollator
+from scipy.stats import pearsonr
+
+class IterativeModularDepersonalization:
+    """   
+        - n_components=5：基于EEG功能连接的典型模式数量
+        - threshold=0.1：允许适度的特征差异
+        - modular_weight=0.5：平衡模块化与重构目标
+        - 模块内权重1.0：反映脑区内强连接
+        - 模块间权重0.2：保持必要的跨区通信
+        - 符合大脑的层次化组织特性
+    """
+    def __init__(self,
+                n_components = 5,
+                threshold = 0.1,
+                modular_weight = 0.5,
+                max_iter = 50,
+                tol = 1e-4,
+                learning_rate = 0.01):
+        """对图表达进行迭代去个性化 得到去个性化表达 （规范化表达）
+
+        Args:
+            n_components (int, optional): 基矩阵的成分数量 共性特征. Defaults to 5.
+            threshold (float, optional): 共性特征筛选的阈值. Defaults to 0.1.
+            modular_weight (float, optional): 约束权重. Defaults to 0.5.
+            max_iter (int, optional): 最大迭代次数. Defaults to 50.
+            tol (float, optional): 收敛阈值. Defaults to 1e-4.
+            learning_rate (float, optional): 初始学习率. Defaults to 0.01.
+        """
+        self.n_components = n_components
+        self.threshold = threshold
+        self.modular_weight = modular_weight
+        self.max_iter = max_iter
+        self.tol = tol
+        self.learning_rate = learning_rate
+        self.convergence_history = []
+
+    def create_module_mask(self, module_indices: List[List[int]], n=30):
+        """生成掩码矩阵
+
+        Args:
+            module_indices (list): 模块化索引列表
+            n (int, optional):  Defaults to 30.
+        """
+        mask = np.zeros((n, n))
+
+        # 模块内连接设置为1 模块外连接设置为0.2
+        for module in module_indices:
+            for i in module:
+                for j in module:
+                    mask[i, j] = 1
+        mask[mask == 0] = 0.2
+
+        return mask
+
+    def calculate_loss(self, current_graph, original_graphs, module_mask):
+        reconstruction_loss = np.mean([
+            np.mean((current_graph - graph) ** 2) for graph in original_graphs
+        ])
+        modular_loss = np.mean(( current_graph * (1 - module_mask)) ** 2)
+        sparsity_loss = np.sum(np.abs(current_graph)) / (current_graph.shape[0] ** 2)
+
+        return reconstruction_loss + modular_loss + 0.1 * sparsity_loss
+    
+    def update_graph(self, current_graph, original_graphs, module_mask, learning_rate):
+        reconstruction_grad = np.mean([
+            2 * (current_graph - g) for g in original_graphs
+        ], axis=0)
+        
+        modular_grad = 2 * current_graph * (1 - module_mask)
+        sparsity_grad = np.sign(current_graph) * 0.1
+        total_grad = reconstruction_grad + modular_grad + sparsity_grad
+        updated_graph = current_graph - learning_rate * total_grad
+        updated_graph = (updated_graph + updated_graph.T) / 2  # 对称性
+        updated_graph = np.maximum(updated_graph, 0)  # 非负性
+        return updated_graph
+
+    def evaluate_result(self, depersonalized_graph, original_graphs, module_indices):
+        results = {}
+        module_mask = self.create_module_mask(module_indices)
+        module_density = np.sum(depersonalized_graph * module_mask) / np.sum(depersonalized_graph)
+        results['modularity'] = module_density
+        correlations = []
+        for g in original_graphs:
+            corr, _ = pearsonr(depersonalized_graph.flatten(), g.flatten())
+            correlations.append(corr)
+        results['mean_correlation'] = np.mean(correlations)
+        sparsity = np.sum(depersonalized_graph > 0.01) / (30 * 30)
+        results['sparsity'] = sparsity
+        
+        return results
+
+    def depersonalize_graphs(self, group1_graphs, group2_graphs, module_indices):
+        group1_graphs = group1_graphs.reshape(1, *group1_graphs.shape) * 1000
+        group2_graphs = group2_graphs.reshape(1, *group2_graphs.shape) * 1000
+        all_graphs = np.concatenate([group1_graphs, group2_graphs], axis=0)
+        n_nodes = all_graphs[0].shape[0]
+        module_mask = self.create_module_mask(module_indices, n=n_nodes)
+        current_graph = np.mean(all_graphs, axis=0)
+        loss_history = []
+        learning_rate = self.learning_rate
+        for iter in range(self.max_iter):
+            current_loss = self.calculate_loss(current_graph, all_graphs, module_mask)
+            loss_history.append(current_loss)
+            if iter > 0 and abs(loss_history[-1] - loss_history[-2]) < self.tol:
+                break
+            if iter > 0 and loss_history[-1] > loss_history[-2]:
+                learning_rate *= 0.5
+            current_graph = self.update_graph(
+                current_graph, 
+                all_graphs, 
+                module_mask, 
+                learning_rate
+            )
+            current_graph[current_graph < self.threshold] = 0
+            current_graph = (current_graph + current_graph.T) / 2
+        
+        self.convergence_history = loss_history
+        return current_graph
+
+
 
 def get_data_loaders_gender(args) -> Tuple[DataLoader]:
     datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])

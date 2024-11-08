@@ -1,7 +1,7 @@
 import torch
 import Utils
 import Utils.Config
-from models.Utils import get_data_loaders_gender
+from models.Utils import get_data_loaders_gender, IterativeModularDepersonalization
 import models.trainer as Trainer
 from models.DGCNN import DGCNN
 import numpy as np
@@ -206,57 +206,97 @@ def get_model(args, edge_wight, edge_idx):
 
 
 def main(args):
-    device = torch.device('cuda' if not args.cpu else 'cpu')
-    print("="*50)
-    print("训练正则化图")
-    group1, group2 = None, None
-    if args.group_mod == 'gender':
-        group1, group2 = get_data_loaders_gender(args)
-    else:
-        # todo  random
-        raise ValueError("不支持的分组方法")
-    group1_trainer = Trainer.get_trainer(args)
-    group2_trainer = Trainer.get_trainer(args)
-    group1_trainer._set_data_loader(group1)
-    group2_trainer._set_data_loader(group2)
-    model_group1 = get_model(args, group1_trainer.edge_weight, group1_trainer.edge_index).to(device)
-    model_group2 = get_model(args, group2_trainer.edge_weight, group2_trainer.edge_index).to(device)
-    group1_trainer._set_model(model_group1)
-    group2_trainer._set_model(model_group2)
-    group1_trainer.init_optimizer()
-    group2_trainer.init_optimizer()
-    for i in range(args.num_epochs):
-        print(f"Epoch {i}")
-        group1_epoch_metrics = group1_trainer._train_with_eeg(args, i)
-        group2_epoch_metrics = group2_trainer._train_with_eeg(args, i)
-        print(f"Group1: {group1_epoch_metrics}")
-        print(f"Group2: {group2_epoch_metrics}")
-    print("="*50)
-    trained_model1 = group1_trainer.get_model()
-    trained_model2 = group2_trainer.get_model()
+    # device = torch.device('cuda' if not args.cpu else 'cpu')
+    # print("="*50)
+    # print("训练正则化图")
+    # group1, group2 = None, None
+    # if args.group_mod == 'gender':
+    #     group1, group2 = get_data_loaders_gender(args)
+    # else:
+    #     # todo  random
+    #     raise ValueError("不支持的分组方法")
+    # group1_trainer = Trainer.get_trainer(args)
+    # group2_trainer = Trainer.get_trainer(args)
+    # group1_trainer._set_data_loader(group1)
+    # group2_trainer._set_data_loader(group2)
+    # model_group1 = get_model(args, group1_trainer.edge_weight, group1_trainer.edge_index).to(device)
+    # model_group2 = get_model(args, group2_trainer.edge_weight, group2_trainer.edge_index).to(device)
+    # group1_trainer._set_model(model_group1)
+    # group2_trainer._set_model(model_group2)
+    # group1_trainer.init_optimizer()
+    # group2_trainer.init_optimizer()
+    # for i in range(args.num_epochs):
+    #     print(f"Epoch {i}")
+    #     group1_epoch_metrics = group1_trainer._train_with_eeg(args, i)
+    #     group2_epoch_metrics = group2_trainer._train_with_eeg(args, i)
+    #     print(f"Group1: {group1_epoch_metrics}")
+    #     print(f"Group2: {group2_epoch_metrics}")
+    # print("="*50)
+    # trained_model1 = group1_trainer.get_model()
+    # trained_model2 = group2_trainer.get_model()
 
-    # 热力图可视化
-    # visualize_lower_triangle(trained_model1.edge_weight.detach().cpu().numpy())
-    # visualize_lower_triangle(trained_model2.edge_weight.detach().cpu().numpy())
+    # # 热力图可视化
+    # # visualize_lower_triangle(trained_model1.edge_weight.detach().cpu().numpy())
+    # # visualize_lower_triangle(trained_model2.edge_weight.detach().cpu().numpy())
 
-    # 环形图可视化
-    G = matrix_to_connectogram_data(trained_model1.edge_weight.detach().cpu().numpy(), total_part, regions_mapping)
-    plot_connectogram(G, threshold=0.0001)
-    plt.show()
-    G = matrix_to_connectogram_data(trained_model2.edge_weight.detach().cpu().numpy(), total_part, regions_mapping)
-    plot_connectogram(G, threshold=0.0001)
-    plt.show()
+    # # 环形图可视化
+    # G = matrix_to_connectogram_data(trained_model1.edge_weight.detach().cpu().numpy(), total_part, regions_mapping)
+    # plot_connectogram(G, threshold=0.0001)
+    # plt.show()
+    # G = matrix_to_connectogram_data(trained_model2.edge_weight.detach().cpu().numpy(), total_part, regions_mapping)
+    # plot_connectogram(G, threshold=0.0001)
+    # plt.show()
 
-    # 保存edge weight
-    save_path = 'results'
-    # 以当前时间为文件名后缀
-    import time
-    import os
-    save_path = 'results'  # 或者你想要的其他路径
-    os.makedirs(save_path, exist_ok=True)
-    current_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
-    np.save(f'{save_path}/model_1_edge_path_{current_time}', trained_model1.edge_weight.detach().cpu().numpy())
-    np.save(f'{save_path}/model_2_edge_path_{current_time}', trained_model2.edge_weight.detach().cpu().numpy())
+    # # 保存edge weight
+    # save_path = 'results'
+    # # 以当前时间为文件名后缀
+    # import time
+    # import os
+    # save_path = 'results'  # 或者你想要的其他路径
+    # os.makedirs(save_path, exist_ok=True)
+    # current_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
+    # np.save(f'{save_path}/model_1_edge_path_{current_time}', trained_model1.edge_weight.detach().cpu().numpy())
+    # np.save(f'{save_path}/model_2_edge_path_{current_time}', trained_model2.edge_weight.detach().cpu().numpy())
+
+
+
+    depersonalizer = IterativeModularDepersonalization(
+        n_components=5,
+        threshold=0.8,
+        modular_weight=0.6,
+        max_iter=50,
+        tol=1e-4,
+        learning_rate=0.01
+    )
+
+    module_indices = [
+        list(range(0, 7)), # 前额叶
+        list(range(7, 11)), # 额中央区
+        list(range(11, 14)), # 中央区
+        list(range(14, 16)), # 颞叶
+        list(range(16, 20)), # 中央顶区
+        list(range(20, 25)), # 顶叶
+        list(range(25, 27)),# 顶枕区
+        list(range(27, 30))# 枕叶
+    ]
+
+    group1_graphs = np.load('results/model_1_edge_path_2024-11-07-21-38-22.npy')
+    group2_graphs = np.load('results/model_2_edge_path_2024-11-07-21-38-22.npy')
+    group1_graphs = trans_triangular_to_full_matrix(group1_graphs)
+    group2_graphs = trans_triangular_to_full_matrix(group2_graphs)
+    final_graph = depersonalizer.depersonalize_graphs(
+        group1_graphs,
+        group2_graphs,
+        module_indices
+    )
+
+    evaluation = depersonalizer.evaluate_result(
+        final_graph,
+        [group1_graphs, group2_graphs],
+        module_indices
+    )
+    print(evaluation)
+
 if __name__ == '__main__':
     args = Utils.Config.init()
     main(args)
