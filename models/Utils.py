@@ -12,8 +12,21 @@ from Datasets.DatasetsUtils import SequenceCollator
 from sklearn.decomposition import NMF
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cosine
+from torch.nn import functional as F
+
+def normalize_matrix(m: torch.Tensor, symmetry: bool=True) -> torch.Tensor:
+    m = F.relu(m) # 通过relu确保所有值都是正数
+    if symmetry:
+        m = m + torch.transpose(m, 0, 1)
+    d = torch.sum(m, dim=1)
+    d = 1 / torch.sqrt(d + 1e-10)
+    d = torch.diag_embed(d)
+    # 计算标准化后的矩阵：D^(-1/2) A D^(-1/2)
+    l = torch.matmul(torch.matmul(d, m), m)
+    return l
 
 
+# todo 移动到 datasetsutils
 def get_data_loaders_gender(args) -> Tuple[DataLoader]:
     datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
     def create_loader(sampler):

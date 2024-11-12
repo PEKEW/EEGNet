@@ -42,11 +42,11 @@ class GenderSubjectSamplerMale(GenderSubjectSampler):
         super().__init__(dataset, strategy=strategy)
         positive_indices = [
             i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.male_sub_list) and (dataset.label[sub_id][f"slice_{slice_id}"] == 1)
+            if (sub_id in self.male_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 1)
         ]
         negative_indices = [
             i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.male_sub_list) and (dataset.label[sub_id][f"slice_{slice_id}"] == 0)
+            if (sub_id in self.male_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 0)
         ]
         pos_size = len(positive_indices)
         neg_size = len(negative_indices)
@@ -68,11 +68,11 @@ class GenderSubjectSamplerFemale(GenderSubjectSampler):
         super().__init__(dataset, strategy=strategy)
         positive_indices = [
             i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.female_sub_list) and (dataset.label[sub_id][f"slice_{slice_id}"] == 1)
+            if (sub_id in self.female_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 1)
         ]
         negative_indices = [
             i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.female_sub_list) and (dataset.label[sub_id][f"slice_{slice_id}"] == 0)
+            if (sub_id in self.female_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 0)
         ]
         pos_size = len(positive_indices)
         neg_size = len(negative_indices)
@@ -235,7 +235,12 @@ class VRSicknessDataset(Dataset):
                         warnings.simplefilter("ignore")
                         raw = mne.io.read_raw_eeglab(f'/tmp/{set_name}', preload=True)
                     data = raw.get_data()
-                    self.eeg_data[sub_id][slice_id] = torch.FloatTensor(data)
+                    # self.eeg_data[sub_id][slice_id] = torch.FloatTensor(data)
+                    data_tensor = torch.FloatTensor(data)
+                    _mean = data_tensor.mean(dim=1, keepdim=True)
+                    _std = data_tensor.std(dim=1, keepdim=True)
+                    normalized_data = (data_tensor - _mean) / (_std + 1e-10)
+                    self.eeg_data[sub_id][slice_id] = normalized_data
                 finally:
                     os.remove(f'/tmp/{set_name}')
 

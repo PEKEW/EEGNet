@@ -3,9 +3,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import SGConv
 from torch_scatter import scatter_add
+import warnings
+from models.Utils import normalize_matrix
 
-# 用于eegdata的gnn
-# eegdata数据维度不算batch：(30， 250)
+
+class DeprecatedConvDescriptor:
+    def __init__(self, _layer):
+        self.conv_layer = _layer
+
+    def __get__(self, instance, owner):
+        warnings.warn(
+            "The member is deprecated and will be removed in future versions. ",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self.conv_layer
+
+
 
 def maybe_num_nodes(edge_idx, num_nodes=None):
     return edge_idx.max().item() + 1 if num_nodes is None else num_nodes
@@ -112,10 +126,22 @@ class DGCNN(nn.Module):
         self.edge_idx = edge_idx
         edge_weight = edge_weight.reshape(self.num_nodes, self.num_nodes)[self.xs, self.ys]
         self.edge_weight = nn.Parameter(torch.Tensor(edge_weight).float(), requires_grad=learnable_edge_weight)
+
+        # 使节点是可学习的 共 node_num 个节点，每个节点使用 num_features 个特征表示
+        self.node_embedding = nn.Parameter(torch.randn(num_nodes, num_features).float(), requires_grad=True)
+        nn.init.xavier_normal_(self.node_embedding)
+
+
         self.dropout = dropout
+        self.bn1 = nn.BatchNorm1d(num_features)
         self.conv1 = _SGConv(num_features=num_features, num_classes=num_hiddens, K=num_layers)
-        self.conv2 = nn.Conv1d(self.num_nodes, 1, 1)
-        self.fc = nn.Linear(num_hiddens, num_classes)
+
+        self.fc1 = nn.Linear(num_hiddens * num_nodes, 64)
+        self.fc2 = nn.Linear(64, num_classes)
+
+        # 已弃用
+        self.conv2 = DeprecatedConvDescriptor(nn.Conv1d(self.num_nodes, 1, 1))
+        self.fc = DeprecatedConvDescriptor(nn.Linear(num_hiddens, num_classes))
     
     def append(self, edge_idx, batch_size):
         """concate a batch of graphs.
@@ -141,18 +167,21 @@ class DGCNN(nn.Module):
 
     def forward(self, x):
         batch_size = len(x)
-        x = x.reshape(-1, x.shape[-1])
-        edge_idx, data_batch = self.append(self.edge_idx, batch_size)
-        edge_weight = torch.zeros(
-            (self.num_nodes, self.num_nodes), device=edge_idx.device)
-        edge_weight[self.xs.to(edge_weight.device), self.ys.to(
-            edge_weight.device)] = self.edge_weight
-        edge_weight = edge_weight + \
-            edge_weight.transpose(1, 0) - torch.diag(edge_weight.diagonal())
+        if self.node_embedding is not None:
+            node_embedding = self.node_embedding.unsqueeze(0).repeat(batch_size, 1, 1)
+            x = x + node_embedding
+        edge_idx, _ = self.append(self.edge_idx, batch_size)
+        edge_weight = torch.zeros((self.num_nodes, self.num_nodes), device=edge_idx.device)
+        edge_weight[self.xs.to(edge_weight.device), self.ys.to(edge_weight.device)] = self.edge_weight
+        edge_weight = edge_weight + edge_weight.transpose(1, 0) - torch.diag(edge_weight.diagonal())
+        edge_weight = normalize_matrix(edge_weight)
         edge_weight = edge_weight.reshape(-1).repeat(batch_size)
+        x = self.bn1(x.transpose(1, 2)).transpose(1, 2)
+        x = x.reshape(-1, x.shape[-1])
         x = self.conv1(x, edge_idx, edge_weight)
-        x = x.view((batch_size, self.num_nodes, -1))
-        x = self.conv2(x)
-        x = F.relu(x.squeeze(1))
-        x = self.fc(x)
+        x = x.view((batch_size, -1))
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+
         return x

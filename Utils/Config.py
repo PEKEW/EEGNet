@@ -6,6 +6,7 @@ import torch
 import numpy as np
 
 class Args:
+    num_features = 250
     def __init__(self):
         self.root_dir = '/home/pekew/code/EEGNet/data'
         self.rand_seed = 42
@@ -27,7 +28,6 @@ class Args:
         self.num_classes = 2
         self.n_subs = 15
         self.num_workers = 8
-        self.num_features = 250
         self.batch_size = 32
         self.clip_norm = 20
         self.mod = ['eeg'] # 数据集加载的模态: 可选项: eeg | optical | original | motion
