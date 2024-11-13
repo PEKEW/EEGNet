@@ -1,9 +1,8 @@
 import torch
-
-
 FPS = 30-1
 
-# todo 重写 这里要考虑不同长度的序列 而且要考虑不同的数据类型
+
+# todo 这里要考虑不同长度的序列 而且要考虑不同的数据类型
 class SequenceCollator:
     def __init__(self,
                  sequence_length=None,
@@ -102,3 +101,4 @@ class SequenceCollator:
         #         result[key] = torch.stack(processed_batch[key])
 
         return result
+

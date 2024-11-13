@@ -1,18 +1,369 @@
 import torch
 import numpy as np
-from torch.utils.data import DataLoader
-import pandas as pd
-import os
-import matplotlib.pyplot as plt
 import math
 from typing import List, Tuple
 from itertools import product
-from Datasets.Datasets import VRSicknessDataset, GenderSubjectSamplerMale, GenderSubjectSamplerFemale
-from Datasets.DatasetsUtils import SequenceCollator
-from sklearn.decomposition import NMF
-from scipy.optimize import linear_sum_assignment
-from scipy.spatial.distance import cosine
 from torch.nn import functional as F
+from sklearn.decomposition import NMF
+from scipy.spatial.distance import cosine
+import matplotlib.pyplot as plt
+import seaborn as sns
+import networkx as nx
+from matplotlib.path import Path
+from Utils.Config import Args
+from scipy.optimize import linear_sum_assignment
+import matplotlib.patches as patches
+
+total_part = '''Fp1 Fp2 Fz F3 F4 F7 F8 Fc1 Fc2 Fc5 Fc6 Cz C3 C4 T7 T8 Cp1 Cp2 Cp5 Cp6 Pz P3 P4 P7 P8 Po3 Po4 Oz O1 O2'''.split()
+regions_mapping = {
+    'Frontal': ['Fp1', 'Fp2', 'F3', 'F4', 'F7', 'F8', 'Fz'],  # 前额叶
+    'Frontocentral': ['Fc1', 'Fc2', 'Fc5', 'Fc6'],  # 额中央区
+    'Central': ['C3', 'C4', 'Cz'],  # 中央区
+    'Temporal': ['T7', 'T8'],  # 颞叶
+    'Centroparietal': ['Cp1', 'Cp2', 'Cp5', 'Cp6'],  # 中央顶区
+    'Parietal': ['P3', 'P4', 'P7', 'P8', 'Pz'],  # 顶叶
+    'Parietooccipital': ['Po3', 'Po4'],  # 顶枕区
+    'Occipital': ['O1', 'O2', 'Oz']  # 枕叶
+}
+
+class DeidentificationInput:
+    """输入数据处理类"""
+    def __init__(self):
+        # 8个功能脑区的划分索引
+        self.module_indices = [
+            list(range(0, 7)),     # 前额叶
+            list(range(7, 11)),    # 额中央区
+            list(range(11, 14)),   # 中央区
+            list(range(14, 16)),   # 颞叶
+            list(range(16, 20)),   # 中央顶区
+            list(range(20, 25)),   # 顶叶
+            list(range(25, 27)),   # 顶枕区
+            list(range(27, 30))    # 枕叶
+        ]
+
+class Preprocessor:
+    """预处理类"""
+    def __init__(self, input_data: DeidentificationInput):
+        self.module_indices = input_data.module_indices
+
+    def normalize_matrix(self, W: np.ndarray) -> np.ndarray:
+        """归一化到[0,1]范围"""
+        return (W - W.min()) / (W.max() - W.min())
+    
+    def ensure_symmetry(self, W: np.ndarray) -> np.ndarray:
+        """确保矩阵对称性"""
+        return (W + W.T) / 2
+    
+    def initialize_module_structure(self) -> np.ndarray:
+        """初始化模块结构掩码"""
+        n = 30
+        mask = np.zeros((n, n))
+        for module in self.module_indices:
+            mask[np.ix_(module, module)] = 1
+        return mask
+
+    def preprocess(self, W: np.ndarray) -> np.ndarray:
+        """执行完整的预处理流程"""
+        W = self.normalize_matrix(W)
+        W = self.ensure_symmetry(W)
+        return W
+
+class ModularNMF:
+    """模块化NMF分解类"""
+    def __init__(self, n_components: int = 10):
+        self.n_components = n_components
+    
+    def _initialize_with_modules(self, module_mask: np.ndarray) -> np.ndarray:
+        """考虑模块结构的初始化"""
+        n = module_mask.shape[0]
+        H_init = np.random.rand(n, self.n_components) * 0.1
+        # 使用模块掩码调整初始值
+        H_init = H_init * module_mask.mean(axis=1).reshape(-1, 1)
+        return H_init
+
+    def decompose(self, W: np.ndarray, module_mask: np.ndarray) -> np.ndarray:
+        """执行NMF分解"""
+        H_init = self._initialize_with_modules(module_mask)
+        
+        model = NMF(
+            n_components=self.n_components,
+            init='random',  # 使用随机初始化
+            solver='mu',    # 使用乘性更新规则
+            max_iter=200,
+            random_state=Args.rand_seed
+        )
+        H = model.fit_transform(W, H=H_init, W=None)
+        return H
+
+class BasisAnalyzer:
+    """基底分析类"""
+    def __init__(self, module_indices):
+        self.module_indices = module_indices
+
+    def _compute_module_contributions(self, basis_vector: np.ndarray) -> np.ndarray:
+        """计算基底在各模块的贡献"""
+        contributions = []
+        for module in self.module_indices:
+            contribution = np.mean(basis_vector[module])
+            contributions.append(contribution)
+        return np.array(contributions)
+
+    def _identify_pattern(self, contributions: np.ndarray) -> str:
+        """识别基底的连接模式"""
+        max_contrib_idx = np.argmax(contributions)
+        if contributions[max_contrib_idx] > 0.5:
+            return f"Module-{max_contrib_idx}-dominant"
+        return "Distributed"
+
+    def analyze_patterns(self, H: np.ndarray) -> list:
+        """分析基底的连接模式"""
+        patterns = []
+        for i in range(H.shape[1]):
+            contributions = self._compute_module_contributions(H[:, i])
+            pattern_type = self._identify_pattern(contributions)
+            patterns.append(pattern_type)
+        return patterns
+
+    def _compute_similarity(self, H1: np.ndarray, H2: np.ndarray) -> np.ndarray:
+        """计算两组基底间的相似度"""
+        n_bases = H1.shape[1]
+        similarity_matrix = np.zeros((n_bases, n_bases))
+        
+        for i in range(n_bases):
+            for j in range(n_bases):
+                similarity_matrix[i, j] = 1 - cosine(H1[:, i], H2[:, j])
+        
+        return similarity_matrix
+
+    def align_bases(self, H1: np.ndarray, H2: np.ndarray) -> tuple:
+        """对齐两组基底"""
+        similarity_matrix = self._compute_similarity(H1, H2)
+        row_ind, col_ind = linear_sum_assignment(-similarity_matrix)
+        return row_ind, col_ind
+
+class Reconstructor:
+    """重构类"""
+    def _fuse_bases(self, H1: np.ndarray, H2: np.ndarray, matches: tuple) -> np.ndarray:
+        """融合对齐的基底"""
+        row_ind, col_ind = matches
+        H_common = np.zeros_like(H1)
+        
+        for i, j in zip(row_ind, col_ind):
+            H_common[:, i] = (H1[:, i] + H2[:, j]) / 2
+            
+        return H_common
+
+    def optimize_structure(self, W: np.ndarray, module_mask: np.ndarray) -> np.ndarray:
+        """优化模块结构"""
+        # 增强模块内连接
+        W = W * (1 + 0.5 * module_mask)
+        # 抑制模块间连接
+        W = W * (1 - 0.4 * (1 - module_mask))
+        # 添加稀疏化处理
+        threshold = 0.4  # 设置阈值
+        W[W < threshold] = 0  # 将小于阈值的连接置零
+        # 确保值在[0,1]范围内
+        W = np.clip(W, 0, 1)
+        
+        return W
+
+    def fuse_and_reconstruct(self, H1: np.ndarray, H2: np.ndarray, matches: tuple) -> np.ndarray:
+        """融合基底并重构"""
+        H_common = self._fuse_bases(H1, H2, matches)
+        W_reconstructed = np.dot(H_common, H_common.T)
+        return W_reconstructed
+
+class Validator:
+    """验证类"""
+    def _compute_similarity_metrics(self, W1: np.ndarray, W2: np.ndarray, W_common: np.ndarray) -> dict:
+        """计算相似度指标"""
+        sim1 = 1 - np.mean(np.abs(W1 - W_common))
+        sim2 = 1 - np.mean(np.abs(W2 - W_common))
+        return {
+            'similarity_to_W1': sim1,
+            'similarity_to_W2': sim2
+        }
+
+    def _compute_modularity_metrics(self, W: np.ndarray, module_mask: np.ndarray) -> float:
+        """计算模块化指标"""
+        module_density = np.sum(W * module_mask) / np.sum(module_mask)
+        non_module_density = np.sum(W * (1 - module_mask)) / np.sum(1 - module_mask)
+        return module_density / (non_module_density + 1e-10)
+
+    def _compute_sparsity_metrics(self, W: np.ndarray) -> float:
+        """计算稀疏度指标"""
+        return 1 - np.count_nonzero(W > 0.1) / W.size
+
+    def evaluate_results(self, W1: np.ndarray, W2: np.ndarray, W_common: np.ndarray, 
+                        module_mask: np.ndarray) -> dict:
+        """评估去个性化效果"""
+        metrics = {
+            **self._compute_similarity_metrics(W1, W2, W_common),
+            'modularity': self._compute_modularity_metrics(W_common, module_mask),
+            'sparsity': self._compute_sparsity_metrics(W_common)
+        }
+        return metrics
+
+class ComprehensiveDeidentification:
+    """完整的去个性化处理类"""
+    def __init__(self, n_components: int = 10):
+        self.input_data = DeidentificationInput()
+        self.preprocessor = Preprocessor(self.input_data)
+        self.nmf = ModularNMF(n_components)
+        self.analyzer = BasisAnalyzer(self.input_data.module_indices)
+        self.reconstructor = Reconstructor()
+        self.validator = Validator()
+    
+    def perform_deidentification(self, W1: np.ndarray, W2: np.ndarray) -> tuple:
+        W1 = self.preprocessor.preprocess(W1)
+        W2 = self.preprocessor.preprocess(W2)
+        module_mask = self.preprocessor.initialize_module_structure()
+        H1 = self.nmf.decompose(W1, module_mask)
+        H2 = self.nmf.decompose(W2, module_mask)
+        patterns = self.analyzer.analyze_patterns(H1)
+        matches = self.analyzer.align_bases(H1, H2)
+        W_common = self.reconstructor.fuse_and_reconstruct(H1, H2, matches)
+        W_common = self.reconstructor.optimize_structure(W_common, module_mask)
+        metrics = self.validator.evaluate_results(W1, W2, W_common, module_mask)
+        return W_common, metrics, patterns
+
+def matrix_to_connectogram_data(matrix, electrode_names, regions_mapping):
+    """将邻接矩阵转换为环形图数据结构
+    Args:
+        matrix: 邻接矩阵
+        electrode_names: 电极名称列表
+        regions_mapping: 脑区映射字典
+    """
+    # 创建图
+    if matrix.shape != (30, 30):
+        matrix = trans_triangular_to_full_matrix(matrix)
+    G = nx.from_numpy_array(matrix)
+    
+    # 添加节点属性
+    colors = {
+        'Frontal': '#4299e1', 
+        'Frontocentral': '#f56565', 
+        'Central': '#9f7aea',    
+        'Temporal': '#48bb78',   
+        'Centroparietal': '#ed64a6',
+        'Parietal': '#ecc94b', 
+        'Parietooccipital': '#667eea', 
+        'Occipital': '#ed8936'
+    }
+    
+    for i, name in enumerate(electrode_names):
+        for region, electrodes in regions_mapping.items():
+            if name in electrodes:
+                G.nodes[i]['region'] = region
+                G.nodes[i]['color'] = colors[region]
+                G.nodes[i]['name'] = name
+                break
+    return G
+
+def plot_connectogram(G, threshold=0.0001):
+    """
+    Creates a circular connectogram visualization of brain regions and their connections.
+    
+    Parameters:
+    G : networkx.Graph
+        Graph with nodes representing brain regions and edges representing connections
+    threshold : float
+        Minimum absolute weight value to show connections
+    """
+    plt.figure(figsize=(12, 12))
+    ax = plt.gca()
+    n_nodes = len(G.nodes())
+    angles = np.linspace(0, 2*np.pi, n_nodes, endpoint=False)
+    radius = 1
+    pos = {i: (radius * np.cos(angle), radius * np.sin(angle)) 
+           for i, angle in enumerate(angles)}
+    def create_segment(start_angle, end_angle, radius, color):
+        theta = np.linspace(start_angle, end_angle, 50)
+        inner_radius = radius * 0.9
+        outer_radius = radius * 1.15
+        
+        vertices = [(inner_radius * np.cos(t), inner_radius * np.sin(t)) for t in theta]
+        vertices.extend([(outer_radius * np.cos(t), outer_radius * np.sin(t)) 
+                        for t in theta[::-1]])
+        return patches.Polygon(vertices, facecolor=color, alpha=0.3, edgecolor='none')
+    
+    segment_width = 2*np.pi / n_nodes
+    for i, node in enumerate(G.nodes()):
+        start_angle = angles[i] - segment_width/2
+        end_angle = angles[i] + segment_width/2
+        color = G.nodes[node]['color']
+        segment = create_segment(start_angle, end_angle, radius, color)
+        ax.add_patch(segment)
+    
+    for (u, v, w) in G.edges(data=True):
+        if abs(w['weight']) > threshold:
+            start = np.array(pos[u])
+            end = np.array(pos[v])
+            diff = end - start
+            dist = np.linalg.norm(diff)
+            mid_point = (start + end) / 2
+            perp = np.array([-diff[1], diff[0]])
+            perp_norm = np.linalg.norm(perp)
+            if perp_norm > 1e-6:  # Check for non-zero norm
+                perp = perp / perp_norm
+                curvature = 0.2 + 0.3 * (dist/2)
+                control_point = mid_point + curvature * perp
+                verts = [tuple(start), tuple(control_point), tuple(end)]
+                codes = [Path.MOVETO, Path.CURVE3, Path.CURVE3]
+                path = Path(verts, codes)
+                color = G.nodes[u]['color']
+                alpha = min(abs(w['weight'])*300, 0.8)
+                line_width = abs(w['weight'])*500
+                patch = patches.PathPatch(path, facecolor='none', edgecolor=color,
+                                        alpha=alpha, linewidth=line_width)
+                ax.add_patch(patch)
+    
+    for i in G.nodes():
+        ax.plot(pos[i][0], pos[i][1], 'o', color=G.nodes[i]['color'],
+                markersize=6, zorder=3)
+        angle = angles[i]
+        label_radius = radius * 1.2
+        label_pos = (label_radius * np.cos(angle), label_radius * np.sin(angle))
+        ha = 'left' if -np.pi/2 <= angle <= np.pi/2 else 'right'
+        va = 'center'
+        rotation = np.degrees(angle)
+        if ha == 'right':
+            rotation += 180
+        if rotation > 90 and rotation <= 270:
+            rotation -= 180
+            
+        plt.text(label_pos[0], label_pos[1], G.nodes[i]['name'],
+                ha=ha, va=va, rotation=rotation,
+                rotation_mode='anchor', fontsize=8)
+
+    plt.axis('equal')
+    ax.set_xlim(-1.5, 1.5)
+    ax.set_ylim(-1.5, 1.5)
+    ax.axis('off')
+    plt.title('Brain Region Connectogram', pad=20)
+    
+    return plt
+
+def trans_triangular_to_full_matrix(triangular_values):
+    matrix_size = 30
+    full_matrix = np.zeros((matrix_size, matrix_size))
+    tril_indices = np.tril_indices(matrix_size)
+    full_matrix[tril_indices] = triangular_values
+    full_matrix = full_matrix + full_matrix.T - np.diag(np.diag(full_matrix))
+    return full_matrix
+
+def visualize_lower_triangle(lower_triangle_values):
+    full_matrix = trans_triangular_to_full_matrix(lower_triangle_values)
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(full_matrix, 
+                cmap='coolwarm',  
+                center=0,         
+                square=True,      
+                annot=False)      
+    
+    plt.title('Edge Weight Visualization')
+    plt.tight_layout()
+    plt.show()
 
 def normalize_matrix(m: torch.Tensor, symmetry: bool=True) -> torch.Tensor:
     m = F.relu(m) # 通过relu确保所有值都是正数
@@ -24,27 +375,6 @@ def normalize_matrix(m: torch.Tensor, symmetry: bool=True) -> torch.Tensor:
     # 计算标准化后的矩阵：D^(-1/2) A D^(-1/2)
     l = torch.matmul(torch.matmul(d, m), m)
     return l
-
-
-# todo 移动到 datasetsutils
-def get_data_loaders_gender(args) -> Tuple[DataLoader]:
-    datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
-    def create_loader(sampler):
-        return DataLoader(
-            datasets,
-            batch_size=args.batch_size,
-            sampler=sampler,
-            num_workers=args.num_workers,
-            collate_fn=SequenceCollator(sequence_length=None, padding_mode='zero',include=['eeg']),
-            pin_memory=torch.cuda.is_available(),
-            persistent_workers=True if args.num_workers > 0 else False,
-            prefetch_factor=2 if args.num_workers > 0 else None,
-            drop_last=True
-        )
-    male_loader = create_loader(GenderSubjectSamplerMale(datasets))
-    female_loader = create_loader(GenderSubjectSamplerFemale(datasets))
-    return male_loader, female_loader
-
 
 def l1_regLoss(model, only=None, exclude=None):
     """返回sqared L1正则化损失
@@ -63,7 +393,6 @@ def l1_regLoss(model, only=None, exclude=None):
                 totalLoss += torch.sum(torch.abs(param))
     return totalLoss
 
-
 def l2_regLoss(predict, label):
     if type(predict) == np.ndarry:
         numSamples = predict.shape[0]
@@ -74,37 +403,8 @@ def l2_regLoss(predict, label):
     
     return np.sum(predict == label) / numSamples if numSamples > 0 else 0
 
-
-def draw_ratio(model_path, csvName, figName, cls=2):
-    nSub = 123
-    path = os.path.join(model_path, csvName)
-    data = pd.read_csv(path)
-    accList = np.array(data[['0']]) * 100
-    accMean = np.mean(accList)
-    std = np.std(accList)
-    print(figName + ' mean: %.1f' % accMean, ' std: %.1f' % std)
-    plt.figure(figsize=(10, 10))
-    titleName = figName + ' mean: %.1f' % accMean + ' std: %.1f' % std
-    plt.title(titleName, fontsize=20, loc='center')
-    xHaxis = [str(num) for num in range(1, nSub + 1 + 1)]
-    y = np.vstack((accList, accMean)).flatten()
-    y[:-1] = np.sort(y[:-1])
-    x = np.arange(0, len(xHaxis))
-    plt.ylim(0, 100)
-    plt.ylabel('Accuracy (%)', fontsize=30)
-    plt.yticks(fontsize=25)
-    plt.bar(x[:-1], y[:-1], facecolor='#D3D3D3', edgecolor='black', width=0.9, label='accuacy for each subject')
-    plt.bar(x[-1] + 5, y[-1], facecolor='#696969', edgecolor='black', width=2.5, label='averaged accuracy')
-    plt.errorbar(x[-1] + 5, y[-1], yerr=std, fmt='o', ecolor='black', color='#000000', elinewidth=1, capsize=2, capthick=1)
-
-    y_ = np.ones((y.shape[0] + 0)) * 1 / int(cls) * 100
-    x_ = np.arange(0, y_.shape[0])
-    plt.plot(x_, y_, linestyle='dashed', color='#808080')
-
-    plt.savefig(os.path.join(model_path, figName + '.png'))
-    plt.savefig(os.path.join(model_path, figName + '.eps'), format='eps')
-    plt.clf()
-
+def get_edge_weight() -> \
+    Tuple[str, List[List[int]], List[List[float]]]:
     """
     返回edge idx 和 edge weight
     edge 是二维数组，分别表示每个电极和彼此之间的连接
@@ -119,8 +419,6 @@ def draw_ratio(model_path, csvName, figName, cls=2):
     否则为exp(-距离的平方/2) 这表示连接距离越远 权重越小 
     为什么使用指数函数可能是因为更平滑的变形
     """
-def get_edge_weight() -> \
-    Tuple[str, List[List[int]], List[List[float]]]:
     total_part = '''Fp1 Fp2 Fz F3 F4 F7 F8 Fc1 Fc2 Fc5 Fc6 Cz C3 C4 T7 T8 Cp1 Cp2 Cp5 Cp6 Pz P3 P4 P7 P8 Po3 Po4 Oz O1 O2'''.split()
     raw_pos_value = np.load('/home/pekew/code/EEGNet/models/pos.npy') * 100
     # raw_pos_value 有32个位置，最后两个是参考电极 不用考虑
@@ -151,25 +449,3 @@ def get_edge_weight() -> \
                 dist = np.sum((pos1 - pos2) ** 2)
                 edge_weight[i][j] = math.exp(-dist / (2 * delta))  # 使用高斯核
     return total_part, edge_index, edge_weight
-
-def draw_res(args):
-    csvName = 'subject_%s_vids_%s_valid_%s.csv' % (args.subjects_type, str(args.n_vids), args.valid_method)
-    draw_ratio(args.model_path, csvName, '%s_acc_%s_%s_%s' % (args.model, args.subjects_type, str(args.n_vids), args.nowTime), cls=args.num_classes)
-
-
-def print_res(args, result):
-    subjectScore = result.subjectsScore
-    if args.subjects_type == 'intra':
-        subjectResults = result.subjectsResults
-        labelVal = result.labelVal
-    print('acc mean: %.3f, std: %.3f' %(np.mean(result.accfold_list), np.std(result.accfold_list)))
-
-    if args.subjects_type == 'intra':
-        subjectScore = [np.sum(subjectResults[i, :] == labelVal[i, :]) 
-                    / subjectResults.shape[1] for i in range(0, args.n_subs)]
-    pd.DataFrame(subjectScore).to_csv(
-        os.path.join(args.model_path, 
-                    'subject_%s_vids_%s_valid_%s.csv' 
-                    % (args.subjects_type, str(args.n_vids), args.valid_method)
-                    )
-    )

@@ -18,9 +18,79 @@ import mne
 import torch
 from PIL import Image
 import torchvision.transforms as transforms
-import torch.multiprocessing as tmp
 from Datasets.DatasetsUtils import SequenceCollator
 import random
+from sklearn.model_selection import train_test_split
+from Utils.Config import Args
+
+class RandomSampler(Sampler):
+    init_list = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
+    def __init__(self, dataset, strategy = 'down', group1 = [], group2 = [], mod = 'train', group_id = 0):
+        """随机对被试采样
+
+        Args:
+            dataset (Dataset): 数据集
+            strategy (str, optional): 平衡样本的方法 上采样补全 下采样截断 可选 up|down. Defaults to 'down'.
+            group1 (list, optional): group1的被试ID 如果为空则随机填充. Defaults to [].
+            group2 (list, optional): 同group1. Defaults to [].
+            mod (str, optional): 训练还是测试：可选 train | test. Defaults to 'train'.
+            group_id (int, optional): 选择当前的分组是 0 | 1. Defaults to 0.
+        """
+        self.dataset = dataset
+        self.indices = []
+        self.mod = mod
+        if group1 == [] or group2 == []:
+            random.shuffle(self.init_list)
+            group1 = self.init_list[:len(self.init_list) // 2]
+            group2 = self.init_list[len(self.init_list) // 2:]
+        self.group1 = group1
+        self.group2 = group2
+        self.strategy = strategy
+        self.id = group_id
+        _list = self.group1 if self.id == 0 else self.group2
+        positive_indices = []
+        negative_indices = []
+        for i, (sub_id, slice_id) in enumerate(dataset.samples):
+            if sub_id in _list:
+                label = dataset.labels[sub_id][f"slice_{slice_id}"]
+                if label == 1:
+                    positive_indices.append(i)
+                else:
+                    negative_indices.append(i)
+        pos_size = len(positive_indices)
+        neg_size = len(negative_indices)
+        target_size = max(pos_size, neg_size) if self.strategy == 'up' else min(pos_size, neg_size)
+        if pos_size > target_size:
+            positive_indices = random.sample(positive_indices, target_size)
+        elif pos_size < target_size:
+            positive_indices = random.choices(positive_indices, k=target_size)
+        if neg_size > target_size:
+            negative_indices = random.sample(negative_indices, target_size)
+        elif neg_size < target_size:
+            negative_indices = random.choices(negative_indices, k=target_size)
+        self.indices = positive_indices + negative_indices
+        random.shuffle(self.indices)
+        balanced_labels = [dataset.labels[dataset.samples[i][0]][f"slice_{dataset.samples[i][1]}"] for i in self.indices]
+
+        train_indices, test_indices = train_test_split(
+            self.indices,
+            random_state=Args.rand_seed,
+            test_size=0.3,
+            shuffle=True,
+            stratify=balanced_labels
+        )
+        
+        self.train_indices = train_indices
+        self.test_indices = test_indices
+
+
+    def __iter__(self):
+        return iter(self.train_indices if self.mod == 'train' else self.test_indices)
+    def __len__(self):
+        return len(self.train_indices) if self.mod == 'train' else len(self.test_indices)
+    
+
+# todo trans sampler class 2 new sampler file
 
 class GenderSubjectSampler(Sampler):
     male_sub_list = ['TYR', 'XSJ', 'CM', 'SHQ', 'LMH', 'LZX', 'LJ', 'WZT']
@@ -35,7 +105,6 @@ class GenderSubjectSampler(Sampler):
         return iter(self.indices)
     def __len__(self):
         return len(self.indices)
-
 
 class GenderSubjectSamplerMale(GenderSubjectSampler):
     def __init__(self, dataset, strategy = 'down'):
@@ -113,12 +182,12 @@ class InterSubjectSampler(Sampler):
     def __len__(self):
         return len(self.indices)
 
-
 class ExtraSubjectSampler(Sampler):
     def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
         pass
     def __iter__(self):
         raise NotImplementedError("ExtraSubjectSampler is not implemented yet.")
+
 
 
 class VRSicknessDataset(Dataset):
@@ -284,7 +353,7 @@ class VRSicknessDataset(Dataset):
         sub_id, slice_id = self.samples[idx]
         
         try:
-            # todo video -> optical, original
+            # todo video -> optical, original 统一一下mod 不是video 而是optical和original等
             if 'video' in self.mod:
                 optical_frames, original_frames = self._load_frames(sub_id, slice_id)
             else:
@@ -341,7 +410,7 @@ class VRSicknessDataset(Dataset):
                 }
             }
 
-
+# todo trans this file 2 loader
 def get_dataloader(root_dir, batch_size=32, num_workers=4, sequence_length=None, padding_mode='zero'):
     """创建数据加载器
     
@@ -364,33 +433,3 @@ def get_dataloader(root_dir, batch_size=32, num_workers=4, sequence_length=None,
     )
     
     return dataloader
-
-# 用法
-def train_loop(dataloader, model, device):
-    for batch in dataloader:
-        # 批量转移到GPU，而不是单个样本转移
-        optical_frames = batch['optical_frames'].to(device, non_blocking=True)
-        original_frames = batch['original_frames'].to(device, non_blocking=True)
-        eeg = batch['eeg'].to(device, non_blocking=True)
-        motion = batch['motion'].to(device, non_blocking=True)
-        label = batch['label'].to(device, non_blocking=True)
-
-
-
-
-# if __name__ == "__main__":
-#     # 设置多进程启动方法为 spawn
-#     if tmp.get_start_method(allow_none=True) is None:
-#         tmp.set_start_method('spawn')
-
-#     image_dir = "data/images"
-#     eeg_dir = "data/eeg"
-#     motion_dir = "data/motion"
-#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#     dataloader = get_dataloader(
-#         root_dir='/home/pekew/code/EEGNet/data',
-#         batch_size=32,
-#         sequence_length=None,  # 使用批次中最长序列长度
-#         padding_mode='repeat')
-
-#     train_loop(dataloader, None, device)

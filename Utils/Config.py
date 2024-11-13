@@ -7,9 +7,9 @@ import numpy as np
 
 class Args:
     num_features = 250
+    rand_seed = 42
     def __init__(self):
         self.root_dir = '/home/pekew/code/EEGNet/data'
-        self.rand_seed = 42
         self.train_fold = 'all'
         self.subjects_type = 'inter' # intra | inter 表示验证方法是被试内还是被试间
         self.valid_method = 'kfold' # 是否使用k折验证
@@ -17,12 +17,12 @@ class Args:
         self.early_stop = 20
         self.band = 30 # 频带数
         self.num_nodes = self.band
-        self.num_epochs = 50
+        self.num_epochs = 20
         self.l1_reg = 0.001
         self.l2_reg = 0.001
         self.lr = 0.001
         self.dropout = 0.5
-        self.num_hiddens = 90
+        self.num_hiddens = 50
         self.num_layers = 2
         self.n_vids = 24
         self.num_classes = 2
@@ -31,7 +31,7 @@ class Args:
         self.batch_size = 32
         self.clip_norm = 20
         self.mod = ['eeg'] # 数据集加载的模态: 可选项: eeg | optical | original | motion
-        self.group_mod = 'gender' # 正则化图的分组方法: 可选项: gender | random
+        self.group_mod = 'random' # 正则化图的分组方法: 可选项: gender | random
         self.n_folds = None
         self.n_per = None
         self.sec = None

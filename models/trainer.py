@@ -108,6 +108,28 @@ class DGCNNTrainer(Trainer):
             device=device)
 
 
+    def _test_with_eeg(self, args):
+        total_samples = 0
+        epoch_metrics = {}
+        num_correct_predict = 0
+        total_class_predictions = []
+
+        with torch.no_grad():
+            for batch in self.data_loader:
+                eeg_data = batch['eeg'].to(self.device, non_blocking=True)
+                label = batch['label'].to(self.device, non_blocking=True).squeeze(1).long()
+                output = self.model(eeg_data)
+                class_predict = output.argmax(axis=-1)
+                class_predict = class_predict.cpu().detach().numpy()
+                total_class_predictions += [item for item in class_predict]
+                label = label.cpu().detach().numpy()
+                num_correct_predict += np.sum(class_predict == label)
+                total_samples += eeg_data.size(0)
+            
+            epoch_metrics['num_correct'] = num_correct_predict
+            epoch_metrics['acc'] = num_correct_predict / total_samples
+        return epoch_metrics
+
 
     def _train_with_eeg(self, args, epoch_num):
         self.model = self.model.train()
