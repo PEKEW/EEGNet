@@ -13,3 +13,4 @@ Datasets/__pycache__
 results
 models/__pycache__
 models/__pycache__/*
+*.pyc

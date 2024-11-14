@@ -4,7 +4,6 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 import warnings
 import torch
-from torch.utils.data import Dataset, DataLoader, Sampler
 from PIL import Image
 import os
 import json
@@ -18,177 +17,7 @@ import mne
 import torch
 from PIL import Image
 import torchvision.transforms as transforms
-from Datasets.DatasetsUtils import SequenceCollator
-import random
-from sklearn.model_selection import train_test_split
-from Utils.Config import Args
-
-class RandomSampler(Sampler):
-    init_list = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
-    def __init__(self, dataset, strategy = 'down', group1 = [], group2 = [], mod = 'train', group_id = 0):
-        """随机对被试采样
-
-        Args:
-            dataset (Dataset): 数据集
-            strategy (str, optional): 平衡样本的方法 上采样补全 下采样截断 可选 up|down. Defaults to 'down'.
-            group1 (list, optional): group1的被试ID 如果为空则随机填充. Defaults to [].
-            group2 (list, optional): 同group1. Defaults to [].
-            mod (str, optional): 训练还是测试：可选 train | test. Defaults to 'train'.
-            group_id (int, optional): 选择当前的分组是 0 | 1. Defaults to 0.
-        """
-        self.dataset = dataset
-        self.indices = []
-        self.mod = mod
-        if group1 == [] or group2 == []:
-            random.shuffle(self.init_list)
-            group1 = self.init_list[:len(self.init_list) // 2]
-            group2 = self.init_list[len(self.init_list) // 2:]
-        self.group1 = group1
-        self.group2 = group2
-        self.strategy = strategy
-        self.id = group_id
-        _list = self.group1 if self.id == 0 else self.group2
-        positive_indices = []
-        negative_indices = []
-        for i, (sub_id, slice_id) in enumerate(dataset.samples):
-            if sub_id in _list:
-                label = dataset.labels[sub_id][f"slice_{slice_id}"]
-                if label == 1:
-                    positive_indices.append(i)
-                else:
-                    negative_indices.append(i)
-        pos_size = len(positive_indices)
-        neg_size = len(negative_indices)
-        target_size = max(pos_size, neg_size) if self.strategy == 'up' else min(pos_size, neg_size)
-        if pos_size > target_size:
-            positive_indices = random.sample(positive_indices, target_size)
-        elif pos_size < target_size:
-            positive_indices = random.choices(positive_indices, k=target_size)
-        if neg_size > target_size:
-            negative_indices = random.sample(negative_indices, target_size)
-        elif neg_size < target_size:
-            negative_indices = random.choices(negative_indices, k=target_size)
-        self.indices = positive_indices + negative_indices
-        random.shuffle(self.indices)
-        balanced_labels = [dataset.labels[dataset.samples[i][0]][f"slice_{dataset.samples[i][1]}"] for i in self.indices]
-
-        train_indices, test_indices = train_test_split(
-            self.indices,
-            random_state=Args.rand_seed,
-            test_size=0.3,
-            shuffle=True,
-            stratify=balanced_labels
-        )
-        
-        self.train_indices = train_indices
-        self.test_indices = test_indices
-
-
-    def __iter__(self):
-        return iter(self.train_indices if self.mod == 'train' else self.test_indices)
-    def __len__(self):
-        return len(self.train_indices) if self.mod == 'train' else len(self.test_indices)
-    
-
-# todo trans sampler class 2 new sampler file
-
-class GenderSubjectSampler(Sampler):
-    male_sub_list = ['TYR', 'XSJ', 'CM', 'SHQ', 'LMH', 'LZX', 'LJ', 'WZT']
-    female_sub_list = ['TX', 'HZ', 'GKW', 'LMH', 'WJX', 'CGW', 'YHY', 'LZY']
-    def __init__(self, dataset, strategy = 'down'):
-        """
-            strategy (str, optional): down | up. Defaults to 'down'.
-        """
-        self.dataset = dataset
-        self.indices = []
-    def __iter__(self):
-        return iter(self.indices)
-    def __len__(self):
-        return len(self.indices)
-
-class GenderSubjectSamplerMale(GenderSubjectSampler):
-    def __init__(self, dataset, strategy = 'down'):
-        super().__init__(dataset, strategy=strategy)
-        positive_indices = [
-            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.male_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 1)
-        ]
-        negative_indices = [
-            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.male_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 0)
-        ]
-        pos_size = len(positive_indices)
-        neg_size = len(negative_indices)
-        target_size = max(pos_size, neg_size) if strategy == 'up' else min(pos_size, neg_size)
-        if pos_size > target_size:
-            positive_indices = random.sample(positive_indices, target_size)
-        elif pos_size < target_size:
-            positive_indices = random.choices(positive_indices, k=target_size)
-        if neg_size > target_size:
-            negative_indices = random.sample(negative_indices, target_size)
-        elif neg_size < target_size:
-            negative_indices = random.choices(negative_indices, k=target_size)
-
-        self.indices = positive_indices + negative_indices
-        random.shuffle(self.indices)
-
-class GenderSubjectSamplerFemale(GenderSubjectSampler):
-    def __init__(self, dataset, strategy = 'down'):
-        super().__init__(dataset, strategy=strategy)
-        positive_indices = [
-            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.female_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 1)
-        ]
-        negative_indices = [
-            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.female_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 0)
-        ]
-        pos_size = len(positive_indices)
-        neg_size = len(negative_indices)
-        target_size = max(pos_size, neg_size) if strategy == 'up' else min(pos_size, neg_size)
-        if pos_size > target_size:
-            positive_indices = random.sample(positive_indices, target_size)
-        elif pos_size < target_size:
-            positive_indices = random.choices(positive_indices, k=target_size)
-        if neg_size > target_size:
-            negative_indices = random.sample(negative_indices, target_size)
-        elif neg_size < target_size:
-            negative_indices = random.choices(negative_indices, k=target_size)
-
-        self.indices = positive_indices + negative_indices
-        random.shuffle(self.indices)
-
-class InterSubjectSampler(Sampler):
-    """跨被试采样器"""
-    def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
-        self.dataset = dataset
-        self.fold = fold
-        self.sub_list = sub_list
-        self.n_subs = len(sub_list)
-        self.n_per = n_per
-        self.is_train = is_train
-        
-        val_start = n_per * fold
-        val_end = min(n_per * (fold + 1), self.n_subs)
-        val_subs = set(self.sub_list[val_start:val_end])
-        
-        self.indices = [
-            i for i, (sub_id, _) in enumerate(dataset.samples)
-            if (sub_id in val_subs) != is_train
-        ]
-    
-    def __iter__(self):
-        return iter(self.indices)
-    def __len__(self):
-        return len(self.indices)
-
-class ExtraSubjectSampler(Sampler):
-    def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
-        pass
-    def __iter__(self):
-        raise NotImplementedError("ExtraSubjectSampler is not implemented yet.")
-
-
+from torch.utils.data import Dataset
 
 class VRSicknessDataset(Dataset):
 
@@ -201,7 +30,7 @@ class VRSicknessDataset(Dataset):
     EEG_DIR_STR = 'EEGData'
     LABEL_DIR_STR = 'labels.json'
 
-    def __init__(self, root_dir, transform=None, mod:list=['eeg', 'video', 'log']):
+    def __init__(self, root_dir, transform=None, mod:list=['eeg', 'original', 'optical','log']):
         self.root_dir = Path(root_dir)
         self.frame_dir = self.root_dir / self.FRAME_DIR_STR
         self.eeg_dir = self.root_dir / self.EEG_DIR_STR
@@ -234,9 +63,9 @@ class VRSicknessDataset(Dataset):
             original_frame_slices = set(self.SLICE_ID_PATTERN_TYPO.search(f).group(1)
                                 for f in frame_files if 'optical.png' in f)
             optical_frame_slices = set(self.SLICE_ID_PATTERN_TYPO.search(f).group(1)
-                                 for f in frame_files if 'optical.png' in f)
+                                for f in frame_files if 'optical.png' in f)
             eeg_slices = set(self.SLICE_ID_PATTERN.search(f).group(1)
-                             for f in eeg_files if f.endswith('.set'))
+                            for f in eeg_files if f.endswith('.set'))
             motion_slices = set(self.SLICE_ID_PATTERN.search(k).group(1)
                                 for k in self.motion_data[sub_id].keys())
             valid_slices = optical_frame_slices & original_frame_slices & eeg_slices & motion_slices
@@ -244,7 +73,7 @@ class VRSicknessDataset(Dataset):
                 valid_samples.append((sub_id, slice_id))
         return valid_samples
     
-    def _load_frames(self, sub_id, slice_id):
+    def _load_frames(self, sub_id, slice_id, _include = ['optical', 'original']):
         """加载图片数据"""
         tar_path = self.frame_dir / f'{sub_id}_combined.tar'
         frames = {'optical': [], 'original': []}
@@ -353,11 +182,15 @@ class VRSicknessDataset(Dataset):
         sub_id, slice_id = self.samples[idx]
         
         try:
-            # todo video -> optical, original 统一一下mod 不是video 而是optical和original等
-            if 'video' in self.mod:
+            if 'original' in self.mod and 'optical' in self.mod:
                 optical_frames, original_frames = self._load_frames(sub_id, slice_id)
-            else:
-                optical_frames, original_frames = None, None
+            elif 'original' in self.mod:
+                _, original_frames = self._load_frames(sub_id, slice_id, _include=['original'])
+                optical_frames = None
+            elif 'optical' in self.mod:
+                optical_frames, _ = self._load_frames(sub_id, slice_id, _include=['optical'])
+                original_frames = None
+                
             if 'log' in self.mod:
                 motion_data = self._load_motion(sub_id, slice_id)
             else:
@@ -368,9 +201,9 @@ class VRSicknessDataset(Dataset):
             return {
                 'sub_id': sub_id,
                 'slice_id': slice_id,
-                'optical_frames': optical_frames,
-                'original_frames': original_frames,
-                'eeg': self.eeg_data[sub_id][slice_id],
+                'optical': optical_frames,
+                'original': original_frames,
+                'eeg': self.eeg_data[sub_id][slice_id] if 'eeg' in self.mod else None,
                 'motion': motion_data,
                 'label': labels
             }
@@ -409,27 +242,3 @@ class VRSicknessDataset(Dataset):
                     'max': motion.max().item()
                 }
             }
-
-# todo trans this file 2 loader
-def get_dataloader(root_dir, batch_size=32, num_workers=4, sequence_length=None, padding_mode='zero'):
-    """创建数据加载器
-    
-    Args:
-        sequence_length: 目标序列长度，None表示使用批次中最长序列的长度
-        padding_mode: 填充模式，'zero' 或 'repeat'
-    """
-    dataset = VRSicknessDataset(root_dir=root_dir)
-    collator = SequenceCollator(sequence_length, padding_mode)
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        collate_fn=collator,
-        pin_memory=torch.cuda.is_available(),
-        persistent_workers=True if num_workers > 0 else False,
-        prefetch_factor=2 if num_workers > 0 else None
-    )
-    
-    return dataloader

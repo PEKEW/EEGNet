@@ -1,8 +1,34 @@
 from torch.utils.data import DataLoader
-from Datasets.Datasets import VRSicknessDataset, GenderSubjectSamplerMale, GenderSubjectSamplerFemale, RandomSampler
+from Datasets.Datasets import VRSicknessDataset
+from Datasets.Samplers import *
 from typing import Tuple
 import torch
 from Datasets.DatasetsUtils import SequenceCollator
+
+
+
+def get_data_loader_cnn(args) -> DataLoader:
+    def create_loader(sampler, collate):
+        return DataLoader(
+            datasets,
+            batch_size=args.batch_size,
+            sampler=sampler,
+            num_workers=args.num_workers,
+            collate_fn=collate,
+            pin_memory=torch.cuda.is_available(),
+            persistent_workers=True if args.num_workers > 0 else False,
+            prefetch_factor=2 if args.num_workers > 0 else None,
+            drop_last=True
+        )
+    include = ['original']
+    group = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
+    datasets = VRSicknessDataset(root_dir=args.root_dir, mod=include)
+    train_sampler = RandomSampler(dataset=datasets,mod='train', group1=group, group2=[])
+    test_sampler = RandomSampler(dataset=datasets,mod='test', group1=group, group2=[])
+    collate = SequenceCollator(sequence_length=None, padding_mode='zero',include=include)
+    train_data_loader = create_loader(train_sampler, collate)
+    test_data_loader = create_loader(test_sampler, collate)
+    return train_data_loader, test_data_loader
 
 def get_data_loaders_random(args) -> Tuple[DataLoader]:
     datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])

@@ -17,7 +17,8 @@ class Args:
         self.early_stop = 20
         self.band = 30 # 频带数
         self.num_nodes = self.band
-        self.num_epochs = 20
+        self.num_epochs_gnn = 20
+        self.num_epochs_video = 50
         self.l1_reg = 0.001
         self.l2_reg = 0.001
         self.lr = 0.001
@@ -39,6 +40,21 @@ class Args:
         self.now_time = None
         self.model_path = None
         self.sub_list = None
+        
+        # CNN 参数
+        self.channels1 = 16
+        self.channels2 = 32
+        
+        # VAE 参数
+        self.hidden_size = 256
+        self.vae_dropout = 0.5
+        
+        # CNNVAE 参数
+        # todo edge是对称矩阵 减少参数
+        self.edge_hidden_size = 900
+        self.node_hidden_size = 250*30
+        
+        
         self.search = False # 是否搜索网络参数
 
 

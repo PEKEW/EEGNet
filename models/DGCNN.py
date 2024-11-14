@@ -143,7 +143,7 @@ class DGCNN(nn.Module):
         self.conv2 = DeprecatedConvDescriptor(nn.Conv1d(self.num_nodes, 1, 1))
         self.fc = DeprecatedConvDescriptor(nn.Linear(num_hiddens, num_classes))
     
-    def append(self, edge_idx, batch_size):
+    def append(self, edge_idx: torch.Tensor, batch_size: int):
         """concate a batch of graphs.
 
         Args:

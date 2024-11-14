@@ -34,22 +34,16 @@ def l2_reg_loss(model,only=None,exclude=None):
     return total_loss
 
 class Trainer(object):
-    def __init__(self, num_nodes, num_hiddens=400, num_classes=2,
-                 batch_size=256, num_epoch=50, lr=0.005, l1_reg=0, l2_reg=0, dropout=0.5, early_stop=20,
-                 optimizer='Adam', device=torch.device('cpu'),
-                 extension: dict = None):
-        self.num_nodes = num_nodes
-        self.num_hiddens = num_hiddens
+    def __init__(self, 
+                batch_size=256, num_epoch=50, lr=0.005, dropout=0.5, early_stop=20, num_classes=2,
+                optimizer='Adam', device=torch.device('cpu'),
+                extension: dict = None):
         self.num_epoch = num_epoch
-        self.num_classes = num_classes
-        self.dropout = dropout
         self.lr = lr
-        self.l1_reg = l1_reg
-        self.l2_reg = l2_reg
-        self.batch_size = batch_size
         self.optimizer = optimizer
         self.device = device
         self.early_stop = early_stop
+        self.batch_size = batch_size
         if extension is not None:
             self.__dict__.update(extension)
         self.trainer_config_para = self.__dict__.copy()
@@ -57,6 +51,8 @@ class Trainer(object):
         self.num_features = None
         self.model_config_para = dict()
         self.data_loader = None
+        self.dropout = dropout
+        self.num_classes = num_classes
 
     def _set_data_loader(self, data_loader):
         self.data_loader = data_loader
@@ -80,7 +76,17 @@ class Trainer(object):
         raise NotImplementedError
 
 class DGCNNTrainer(Trainer):
-    def __init__(self, edge_index, edge_weight, num_classes, device, num_hiddens, num_layers, dropout, batch_size, lr, l1_reg, l2_reg, num_epochs):
+    def __init__(self, edge_index, edge_weight, 
+                num_classes, device, num_hiddens,
+                num_layers, dropout, batch_size,
+                lr, l1_reg, l2_reg, num_epochs):
+        super(DGCNNTrainer, self).__init__(
+            num_classes=num_classes,
+            batch_size=batch_size,
+            num_epoch=num_epochs,
+            lr=lr,
+            dropout=dropout,
+            device=device)
         self.edge_index = edge_index
         self.edge_weight = edge_weight
         self.num_classes = num_classes
@@ -90,22 +96,14 @@ class DGCNNTrainer(Trainer):
         self.dropout = dropout
         self.batch_size = batch_size
         self.lr = lr
+        self.l1_reg = l1_reg
         self.l2_reg = l2_reg
         self.num_epochs = num_epochs
         num_nodes = 0
         if edge_weight is not None:
             num_nodes = edge_weight.shape[0]
-        super(DGCNNTrainer, self).__init__(
-            num_nodes=num_nodes, 
-            num_hiddens=num_hiddens,
-            num_classes=num_classes,
-            batch_size=batch_size,
-            num_epoch=num_epochs,
-            lr=lr,
-            l1_reg=l1_reg,
-            l2_reg=l2_reg,
-            dropout=dropout,
-            device=device)
+        self.num_nodes = num_nodes
+        
 
 
     def _test_with_eeg(self, args):
@@ -189,17 +187,157 @@ class DGCNNTrainer(Trainer):
         return self.model
 
 
-def get_trainer(args) -> DGCNNTrainer:
+class CNNTrainer(Trainer):
+    def __init__(self, num_classes, device, dropout, batch_size, lr, num_epochs):
+        super(CNNTrainer, self).__init__(
+            num_classes=num_classes,
+            batch_size=batch_size,
+            num_epoch=num_epochs,
+            lr=lr,
+            dropout=dropout,
+            device=device)
+    
+    def _train_with_all(self, args, epoch_num):
+
+        self.model = self.model.train()
+        epoch_loss = {
+            'entropy_loss': 0,
+        }
+
+        total_samples = 0
+        epoch_metrics = {}
+        num_correct_predict = 0
+        total_class_predictions = []
+        
+        for batch in self.data_loader:
+            self.optimizer.zero_grad()
+            original_data = batch['original'].to(self.device, non_blocking=True)
+            optical_data = batch['optical'].to(self.device, non_blocking=True)
+            label = batch['label'].to(self.device, non_blocking=True).squeeze(1).long()
+            output = self.model(original_data, optical_data)
+            entropy_loss = F.cross_entropy(output, label)
+            
+            class_predict = output.argmax(axis=-1)
+            class_predict = class_predict.cpu().detach().numpy()
+            total_class_predictions += [item for item in class_predict]
+            label = label.cpu().detach().numpy()
+            num_correct_predict += np.sum(class_predict == label)
+            
+            loss = entropy_loss
+            loss.backward()
+            
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=args.clip_norm)
+            self.optimizer.step()
+            
+            with torch.no_grad():
+                total_samples += original_data.size(0)
+                epoch_loss['entropy_loss'] += entropy_loss.item()
+            
+        epoch_metrics['epoch'] = epoch_num
+        epoch_metrics['loss'] = epoch_loss['entropy_loss'] / (total_samples/self.batch_size)
+        epoch_metrics['num_correct'] = num_correct_predict
+        epoch_metrics['acc'] = num_correct_predict / total_samples
+        
+        return epoch_metrics
+            
+    def _train_with_optical(self, args, epoch_num):
+        
+        self.model = self.model.train()
+        epoch_loss = {
+            'entropy_loss': 0,
+        }
+
+        total_samples = 0
+        epoch_metrics = {}
+        num_correct_predict = 0
+        total_class_predictions = []
+        
+        for batch in self.data_loader:
+            self.optimizer.zero_grad()
+            optical_data = batch['optical'].to(self.device, non_blocking=True)
+            label = batch['label'].to(self.device, non_blocking=True).squeeze(1).long()
+            output = self.model(None, optical_data)
+            entropy_loss = F.cross_entropy(output, label)
+            
+            class_predict = output.argmax(axis=-1)
+            class_predict = class_predict.cpu().detach().numpy()
+            total_class_predictions += [item for item in class_predict]
+            label = label.cpu().detach().numpy()
+            num_correct_predict += np.sum(class_predict == label)
+            
+            loss = entropy_loss
+            loss.backward()
+            
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=args.clip_norm)
+            self.optimizer.step()
+            
+            with torch.no_grad():
+                total_samples += optical_data.size(0)
+                epoch_loss['entropy_loss'] += entropy_loss.item()
+                
+            epoch_metrics['epoch'] = epoch_num
+            epoch_metrics['loss'] = epoch_loss['entropy_loss'] / (total_samples/self.batch_size)
+            epoch_metrics['num_correct'] = num_correct_predict
+            epoch_metrics['acc'] = num_correct_predict / total_samples
+            
+            return epoch_metrics
+    
+    def _train_with_original(self, args, epoch_num):
+        self.model = self.model.train()
+        epoch_loss = {
+            'entropy_loss': 0,
+        }
+
+        total_samples = 0
+        epoch_metrics = {}
+        num_correct_predict = 0
+        total_class_predictions = []
+        
+        for batch in self.data_loader:
+            self.optimizer.zero_grad()
+            original_data = batch['original'].to(self.device, non_blocking=True)
+            label = batch['label'].to(self.device, non_blocking=True).squeeze(1).long()
+            output, *_ = self.model(original_data, None)
+            entropy_loss = F.cross_entropy(output, label)
+            
+            class_predict = output.argmax(axis=-1)
+            class_predict = class_predict.cpu().detach().numpy()
+            total_class_predictions += [item for item in class_predict]
+            label = label.cpu().detach().numpy()
+            num_correct_predict += np.sum(class_predict == label)
+            
+            loss = entropy_loss
+            loss.backward()
+            
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=args.clip_norm)
+            self.optimizer.step()
+            
+            with torch.no_grad():
+                total_samples += original_data.size(0)
+                epoch_loss['entropy_loss'] += entropy_loss.item()
+                
+        epoch_metrics['epoch'] = epoch_num
+        epoch_metrics['loss'] = epoch_loss['entropy_loss'] / (total_samples/self.batch_size)
+        epoch_metrics['num_correct'] = num_correct_predict
+        epoch_metrics['acc'] = num_correct_predict / total_samples
+        
+        return epoch_metrics 
+
+    
+def get_gnn_trainer(args) -> DGCNNTrainer:
     if args.cpu == True:
-        deviceUsing = torch.device('cpu')
+        device_using = torch.device('cpu')
     else:
-        deviceUsing = torch.device('cuda')
+        device_using = torch.device('cuda')
     _, edge_index, edge_weight = mUtils.get_edge_weight()
     return DGCNNTrainer(
             edge_index = edge_index,
             edge_weight = edge_weight,
             num_classes=args.num_classes,
-            device=deviceUsing,
+            device=device_using,
             num_hiddens = args.num_hiddens,
             num_layers = args.num_layers,
             dropout = args.dropout,
@@ -209,3 +347,14 @@ def get_trainer(args) -> DGCNNTrainer:
             l2_reg = args.l2_reg,
             num_epochs = args.num_epochs
         )
+    
+def get_cnn_trainer(args) -> CNNTrainer:
+    device_using = torch.device('cuda' if not args.cpu else 'cpu')
+    return CNNTrainer(
+        num_classes  = args.num_classes,
+        device = device_using,
+        dropout = args.dropout,
+        batch_size = args.batch_size,
+        lr = args.lr,
+        num_epochs = args.num_epochs_video
+    )
