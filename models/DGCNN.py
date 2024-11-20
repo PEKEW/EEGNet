@@ -59,7 +59,7 @@ def add_remaining_self_loops(edge_idx, edge_weight=None, fillValue=1, num_nodes=
     return edge_idx, edge_weight
 
 class _SGConv(SGConv):
-    def __init__(self, num_features, num_classes, K=1, cached=False, bias=True):
+    def __init__(self, num_features, num_classes, K=2, cached=False, bias=True):
         super(_SGConv, self).__init__(num_features, num_classes, K, cached, bias)
         nn.init.xavier_normal_(self.lin.weight)
     
@@ -105,7 +105,18 @@ class _SGConv(SGConv):
     
 
 class DGCNN(nn.Module):
-    def __init__(self, device, num_nodes, edge_weight, edge_idx, num_features, num_hiddens, num_classes, num_layers, learnable_edge_weight=True, dropout=0.5):
+    def __init__(self,
+                device,
+                num_nodes,
+                edge_weight,
+                edge_idx,
+                num_features,
+                num_hiddens,
+                num_classes,
+                num_layers,
+                dropout=0.5,
+                hidden_channels=64,
+                node_learnable = True):
         """DGCNN model
         Args:
             device (torch.device): model device.
@@ -125,19 +136,21 @@ class DGCNN(nn.Module):
         self.xs, self.ys = torch.tril_indices(self.num_nodes, self.num_nodes, offset=0)
         self.edge_idx = edge_idx
         edge_weight = edge_weight.reshape(self.num_nodes, self.num_nodes)[self.xs, self.ys]
-        self.edge_weight = nn.Parameter(torch.Tensor(edge_weight).float(), requires_grad=learnable_edge_weight)
+        self.edge_weight = nn.Parameter(torch.Tensor(edge_weight).float(), requires_grad=True)
 
-        # 使节点是可学习的 共 node_num 个节点，每个节点使用 num_features 个特征表示
-        self.node_embedding = nn.Parameter(torch.randn(num_nodes, num_features).float(), requires_grad=True)
-        nn.init.xavier_normal_(self.node_embedding)
+        if node_learnable:
+            self.node_embedding = nn.Parameter(torch.randn(num_nodes, num_features).float(), requires_grad=True)
+            nn.init.xavier_normal_(self.node_embedding)
+        else:
+            self.node_embedding = None
 
 
         self.dropout = dropout
         self.bn1 = nn.BatchNorm1d(num_features)
         self.conv1 = _SGConv(num_features=num_features, num_classes=num_hiddens, K=num_layers)
 
-        self.fc1 = nn.Linear(num_hiddens * num_nodes, 64)
-        self.fc2 = nn.Linear(64, num_classes)
+        self.fc1 = nn.Linear(num_hiddens * num_nodes, hidden_channels)
+        self.fc2 = nn.Linear(hidden_channels, num_classes)
 
         # 已弃用
         self.conv2 = DeprecatedConvDescriptor(nn.Conv1d(self.num_nodes, 1, 1))

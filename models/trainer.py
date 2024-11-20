@@ -79,14 +79,15 @@ class DGCNNTrainer(Trainer):
     def __init__(self, edge_index, edge_weight, 
                 num_classes, device, num_hiddens,
                 num_layers, dropout, batch_size,
-                lr, l1_reg, l2_reg, num_epochs):
+                lr, l1_reg, l2_reg, num_epochs, optimizer):
         super(DGCNNTrainer, self).__init__(
             num_classes=num_classes,
             batch_size=batch_size,
             num_epoch=num_epochs,
             lr=lr,
             dropout=dropout,
-            device=device)
+            device=device,
+            optimizer=optimizer)
         self.edge_index = edge_index
         self.edge_weight = edge_weight
         self.num_classes = num_classes
@@ -104,14 +105,12 @@ class DGCNNTrainer(Trainer):
             num_nodes = edge_weight.shape[0]
         self.num_nodes = num_nodes
         
-
-
     def _test_with_eeg(self, args):
         total_samples = 0
         epoch_metrics = {}
         num_correct_predict = 0
         total_class_predictions = []
-
+        overlap = []
         with torch.no_grad():
             for batch in self.data_loader:
                 eeg_data = batch['eeg'].to(self.device, non_blocking=True)
@@ -123,9 +122,11 @@ class DGCNNTrainer(Trainer):
                 label = label.cpu().detach().numpy()
                 num_correct_predict += np.sum(class_predict == label)
                 total_samples += eeg_data.size(0)
+                overlap.append([f"{batch['sub_id'][i]}_{batch['slice_id'][i]}" for i in range(len(class_predict == label)) if (class_predict == label)[i]])
             
             epoch_metrics['num_correct'] = num_correct_predict
             epoch_metrics['acc'] = num_correct_predict / total_samples
+            # print(overlap)
         return epoch_metrics
 
 
@@ -197,6 +198,7 @@ class CNNTrainer(Trainer):
             dropout=dropout,
             device=device)
     
+    # todo 这这几个函数可以合并在一起
     def _train_with_all(self, args, epoch_num):
 
         self.model = self.model.train()
@@ -325,6 +327,35 @@ class CNNTrainer(Trainer):
         epoch_metrics['acc'] = num_correct_predict / total_samples
         
         return epoch_metrics 
+    
+    def _test_with_video(self, args):
+        total_sample = 0
+        epoch_metrics = {}
+        num_correct_predict = 0
+        total_class_predictions = []
+        overlap = []
+        with torch.no_grad():
+            for batch in self.data_loader:
+                original_data, optical_data = None, None
+                if 'original' in batch:
+                    original_data = batch['original'].to(self.device, non_blocking=True)
+                if 'optical' in batch:
+                    optical_data = batch['optical'].to(self.device, non_blocking=True)
+                label = batch['label'].to(self.device, non_blocking=True).squeeze(1).long()
+                output, *_ = self.model(original_data, optical_data)
+                class_predict = output.argmax(axis=-1)
+                class_predict = class_predict.cpu().detach().numpy()
+                total_class_predictions += [item for item in class_predict]
+                label = label.cpu().detach().numpy()
+                num_correct_predict += np.sum(class_predict == label)
+                total_sample += original_data.size(0)
+                overlap.append([f"{batch['sub_id'][i]}_{batch['slice_id'][i]}" for i in range(len(class_predict == label)) if (class_predict == label)[i]])
+            
+            print(overlap)    
+            epoch_metrics['num_correct'] = num_correct_predict
+            
+            epoch_metrics['acc'] = num_correct_predict / total_sample
+        return epoch_metrics
 
     
 def get_gnn_trainer(args) -> DGCNNTrainer:
@@ -333,6 +364,7 @@ def get_gnn_trainer(args) -> DGCNNTrainer:
     else:
         device_using = torch.device('cuda')
     _, edge_index, edge_weight = mUtils.get_edge_weight()
+    optimizer = args.optimizer
     return DGCNNTrainer(
             edge_index = edge_index,
             edge_weight = edge_weight,
@@ -345,7 +377,8 @@ def get_gnn_trainer(args) -> DGCNNTrainer:
             lr = args.lr,
             l1_reg = args.l1_reg,
             l2_reg = args.l2_reg,
-            num_epochs = args.num_epochs
+            num_epochs = args.num_epochs_gnn,
+            optimizer = optimizer
         )
     
 def get_cnn_trainer(args) -> CNNTrainer:

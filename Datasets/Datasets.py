@@ -180,16 +180,17 @@ class VRSicknessDataset(Dataset):
     
     def __getitem__(self, idx):
         sub_id, slice_id = self.samples[idx]
+        optical, original, motion_data = None, None, None
         
         try:
             if 'original' in self.mod and 'optical' in self.mod:
-                optical_frames, original_frames = self._load_frames(sub_id, slice_id)
+                optical, original = self._load_frames(sub_id, slice_id)
             elif 'original' in self.mod:
-                _, original_frames = self._load_frames(sub_id, slice_id, _include=['original'])
-                optical_frames = None
+                _, original = self._load_frames(sub_id, slice_id, _include=['original'])
+                optical = None
             elif 'optical' in self.mod:
-                optical_frames, _ = self._load_frames(sub_id, slice_id, _include=['optical'])
-                original_frames = None
+                optical, _ = self._load_frames(sub_id, slice_id, _include=['optical'])
+                original = None
                 
             if 'log' in self.mod:
                 motion_data = self._load_motion(sub_id, slice_id)
@@ -201,8 +202,8 @@ class VRSicknessDataset(Dataset):
             return {
                 'sub_id': sub_id,
                 'slice_id': slice_id,
-                'optical': optical_frames,
-                'original': original_frames,
+                'optical': optical,
+                'original': original,
                 'eeg': self.eeg_data[sub_id][slice_id] if 'eeg' in self.mod else None,
                 'motion': motion_data,
                 'label': labels

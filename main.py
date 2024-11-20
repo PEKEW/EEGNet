@@ -5,6 +5,11 @@ from Datasets.DataloaderUtils import get_data_loaders_gender, get_data_loaders_r
 import models.trainer as Trainer
 from models.DGCNN import DGCNN
 from models.CNNVAE import CNNVAE
+from models.Utils import *
+import numpy as np
+import matplotlib.pyplot as plt
+from Datasets.Datasets import VRSicknessDataset
+
 
 def get_gnn_model(args, edge_wight, edge_idx):
     return DGCNN(
@@ -16,6 +21,9 @@ def get_gnn_model(args, edge_wight, edge_idx):
         num_classes=args.num_classes,
         num_hiddens=args.num_hiddens,
         num_layers=args.num_layers,
+        dropout=args.eeg_dropout,
+        hidden_channels=args.edge_hidden_size,
+        node_learnable=args.node_learnable,
     )
 
 
@@ -25,8 +33,8 @@ def get_cnn_model():
     )
 
 def train_cnn_vae(device: torch.device, args):
-    print("=" * 50)
-    print("训练CNN-VAE")
+    # print("=" * 50)
+    # print("训练CNN-VAE")
     train_loader, test_loader = get_data_loader_cnn(args)
     trainer = Trainer.get_cnn_trainer(args)
     trainer._set_data_loader(train_loader)
@@ -34,62 +42,108 @@ def train_cnn_vae(device: torch.device, args):
     trainer._set_model(model)
     trainer.init_optimizer()
     for epoch in range(args.num_epochs_video):
-        print(f"Epoch {epoch}")
+        # print(f"Epoch {epoch}")
         metric = trainer._train_with_original(args, epoch)
-        print(f"Train: {metric}")
+        # print(f"Train: {metric}")
     
-    tester = Trainer.get_trainer(args)
+    tester = Trainer.get_cnn_trainer(args)
     tester._set_data_loader(test_loader)
-    tester._set_model(trainer.get_model())
+    tester._set_model(get_cnn_model().to(device))
     metric = tester._test_with_video(args)
-    print(f"Test: {metric}")
+    # print(f"Test: {metric}")
 
 
 def train_normalize_eeg_gnn(device: torch.device, args):
-    print("=" * 50)
-    print("训练正则化图")
+    datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
+    best_acc = 0
+    best_combo = None
+    if not args.search:
+        if args.group_mod == 'gender':
+            group1, group2 = get_data_loaders_gender(args)
+        else:
+            train_loaders = get_data_loaders_random(args, datasets)
+            group1, group2 = train_loaders[:2], train_loaders[2:]
+        def setup_trainer(loader, args):
+            trainer = Trainer.get_gnn_trainer(args)
+            trainer._set_data_loader(loader)
+            model = get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device)
+            trainer._set_model(model)
+            trainer.init_optimizer()
+            return trainer
 
-    # 获取数据加载器
-    if args.group_mod == 'gender':
-        group1, group2 = get_data_loaders_gender(args)
+        trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
+        
+        for epoch in range(args.num_epochs_gnn):
+            metrics = [trainer._train_with_eeg(args, epoch) for trainer in trainers]
+            for i, metric in enumerate(metrics, 1):
+                print(f"Group{i}: {metric}")
+        print("=" * 50)
+
+        test_metrics = []
+        for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1], group2[1]]), 1):
+            tester = Trainer.get_gnn_trainer(args)
+            tester._set_data_loader(test_loader)
+            tester._set_model(get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device))
+            metric = tester._test_with_eeg(args)
+            test_metrics.append(metric)
+            print(f"Group{i} Test: {metric}")
     else:
-        train_loaders = get_data_loaders_random(args)
-        group1, group2 = train_loaders[:2], train_loaders[2:]
+        param_dict = args.init_range_gnn()
+        print("=" * 50, "Searching")
+        for combo in param_dict:
+            
+            print(f"Combo: {combo}")
+            
+            args.group = combo['group']
+            args.node_learnable = combo['node_learnable']
+            args.eeg_hidden_size = combo['eeg_hidden_size']
+            args.eeg_dropout = combo['eeg_dropout']
+            args.num_layers = combo['num_layers']
+            args.batch_size = combo['batch_size']
+            args.data_sampler_strategy = combo['data_sampler_strategy']
+            args.optimizer = combo['optimizer']
+            args.rand_seed = combo['rand_seed']
+            args.num_epochs_gnn = combo['num_epochs_gnn']
+            args.l1_reg = combo['l1_reg']
+            args.l2_reg = combo['l2_reg']
+            args.lr = combo['lr']
+            
+            train_loaders = get_data_loaders_random(args, datasets)
+            group1, group2 = train_loaders[:2], train_loaders[2:]
+            
+            def setup_trainer(loader, args):
+                trainer = Trainer.get_gnn_trainer(args)
+                trainer._set_data_loader(loader)
+                model = get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device)
+                trainer._set_model(model)
+                trainer.init_optimizer()
+                return trainer
+            
+            trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
+            
+            for epoch in range(args.num_epochs_gnn):
+                [trainer._train_with_eeg(args, epoch) for trainer in trainers]
 
-    # 创建和训练模型
-    def setup_trainer(loader, args):
-        trainer = Trainer.get_gnn_trainer(args)
-        trainer._set_data_loader(loader)
-        model = get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device)
-        trainer._set_model(model)
-        trainer.init_optimizer()
-        return trainer
-
-    trainers = [setup_trainer(loader, args) for loader in [group1[0], group2[0]]]
-    
-    # 训练循环
-    for epoch in range(args.num_epochs_gnn):
-        print(f"Epoch {epoch}")
-        metrics = [trainer._train_with_eeg(args, epoch) for trainer in trainers]
-        for i, metric in enumerate(metrics, 1):
-            print(f"Group{i}: {metric}")
-    print("=" * 50)
-
-    # 测试阶段
-    test_metrics = []
-    for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1], group2[1]]), 1):
-        tester = Trainer.get_trainer(args)
-        tester._set_data_loader(test_loader)
-        tester._set_model(trainer.get_model())
-        metric = tester._test_with_eeg(args)
-        test_metrics.append(metric)
-        print(f"Group{i} Test: {metric}")
+            test_metrics = []
+            for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1], group2[1]]), 1):
+                tester = Trainer.get_gnn_trainer(args)
+                tester._set_data_loader(test_loader)
+                tester._set_model(get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device))
+                metric = tester._test_with_eeg(args)
+                test_metrics.append(metric)
+                print(f"acc: {metric}")
+            if test_metrics[0]['acc'] > best_acc:
+                best_acc = test_metrics[0]['acc']
+                best_combo = combo
+        print("=" * 50)
+        print(f"Best Combo: {best_combo}, Best Acc: {best_acc}")
+        
 
 
 def main(args):
     device = torch.device('cuda' if not args.cpu else 'cpu')
-    # train_normalize_eeg_gnn(device, args)
-    train_cnn_vae(device, args)
+    train_normalize_eeg_gnn(device, args)
+    # train_cnn_vae(device, args)
     
 
 
@@ -110,10 +164,9 @@ def main(args):
 
     # # 保存edge weight
     # save_path = 'results'
-    # # 以当前时间为文件名后缀
     # import time
     # import os
-    # save_path = 'results'  # 或者你想要的其他路径
+    # save_path = 'results'  
     # os.makedirs(save_path, exist_ok=True)
     # current_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
     # np.save(f'{save_path}/model_1_edge_path_{current_time}', trained_model1.edge_weight.detach().cpu().numpy())
@@ -122,17 +175,13 @@ def main(args):
 
 
 
-
-    # group1_graphs = np.load('results/model_1_edge_path_2024-11-07-21-38-22.npy')
-    # group2_graphs = np.load('results/model_2_edge_path_2024-11-07-21-38-22.npy')
-    # group1_graphs = trans_triangular_to_full_matrix(group1_graphs)
-    # group2_graphs = trans_triangular_to_full_matrix(group2_graphs)
-    # deidentifier = ComprehensiveDeidentification(n_components=10)
-    # W_common, metrics, patterns = deidentifier.perform_deidentification(group1_graphs, group2_graphs)
-    # # 打印结果
-    # print("Metrics:", metrics)
-    # print("Patterns:", patterns)
-    # W_common = W_common / 1000
+# # 
+#     group1_graphs = np.load('results/model_2_edge_path_2024-11-07-21-38-22.npy')
+#     group2_graphs = np.load('results/model_2_edge_path_2024-11-07-21-38-22.npy')
+#     group1_graphs = trans_triangular_to_full_matrix(group1_graphs)
+#     group2_graphs = trans_triangular_to_full_matrix(group2_graphs)
+#     deidentifier = ComprehensiveDeidentification(n_components=16)
+#     W_common, metrics, patterns = deidentifier.perform_deidentification(group1_graphs, group2_graphs)
     # G = matrix_to_connectogram_data(group1_graphs, total_part, regions_mapping)
     # plot_connectogram(G, threshold=0.0001)
     # plt.show()
@@ -142,6 +191,38 @@ def main(args):
     # G = matrix_to_connectogram_data(W_common, total_part, regions_mapping)
     # plot_connectogram(G, threshold=0.0001)
     # plt.show()
+    
+    
+    # group1_graphs = group1_graphs * 100
+    # region_matrix, region_names = matrix_to_region_matrix(group1_graphs, total_part, regions_mapping)
+    # plot_region_connectogram(region_matrix, region_names, threshold=0.0001)
+    # plt.show()
+    
+    
+    # group2_graphs = group2_graphs * 100
+    # region_matrix, region_names = matrix_to_region_matrix(group2_graphs, total_part, regions_mapping)
+    # plot_region_connectogram(region_matrix, region_names, threshold=0.0001)
+    # plt.show()
+    
+    # W_common = W_common / 20
+    # region_matrix, region_names = matrix_to_region_matrix(W_common, total_part, regions_mapping)
+    # plot_region_connectogram(region_matrix, region_names, threshold=0.0001)
+    # plt.show()
+    
+    # group1_graphs = (group1_graphs - group1_graphs.min()) / (group1_graphs.max() - group1_graphs.min())
+    # group2_graphs = (group2_graphs - group2_graphs.min()) / (group2_graphs.max() - group2_graphs.min())
+    # W_common = (W_common - W_common.min()) / (W_common.max() - W_common.min())
+    # region_matrix, region_names = matrix_to_region_matrix(W_common, total_part, regions_mapping)
+    # # fig = plot_brain_connectivity_multiple_views(region_matrix, region_names, threshold=0.01)
+    # # plt.show()
+    # region_matrix, region_names = matrix_to_region_matrix(group1_graphs, total_part, regions_mapping)
+    # fig = plot_brain_connectivity_multiple_views(region_matrix, region_names, threshold=0.001)
+    # plt.show()
+    # region_matrix, region_names = matrix_to_region_matrix(group2_graphs, total_part, regions_mapping)
+    # fig = plot_brain_connectivity_multiple_views(region_matrix, region_names, threshold=0.001)
+    # plt.show()
+# 
+    
 
 if __name__ == '__main__':
     args = Utils.Config.init()

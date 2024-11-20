@@ -30,8 +30,10 @@ def get_data_loader_cnn(args) -> DataLoader:
     test_data_loader = create_loader(test_sampler, collate)
     return train_data_loader, test_data_loader
 
-def get_data_loaders_random(args) -> Tuple[DataLoader]:
-    datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
+def get_data_loaders_random(args, datasets=None) -> Tuple[DataLoader]:
+    group = args.group
+    if datasets is None:
+        datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
     def create_loader(sampler):
         return DataLoader(
             datasets,
@@ -44,10 +46,10 @@ def get_data_loaders_random(args) -> Tuple[DataLoader]:
             prefetch_factor=2 if args.num_workers > 0 else None,
             drop_last=True
         )
-    random_loader_train_1 = create_loader(RandomSampler(dataset=datasets,mod='train',group_id=0))
-    random_loader_test_1 = create_loader(RandomSampler(dataset=datasets,mod='test',group_id=0))
-    random_loader_train_2 = create_loader(RandomSampler(dataset=datasets,mod='train',group_id=1))
-    random_loader_test_2 = create_loader(RandomSampler(dataset=datasets,mod='test',group_id=1))
+    random_loader_train_1 = create_loader(RandomSampler(dataset=datasets,mod='train',group_id=0, group1=group, group2 = [], strategy=args.data_sampler_strategy))
+    random_loader_test_1 = create_loader(RandomSampler(dataset=datasets,mod='test',group_id=0, group1=group, group2 = [], strategy = args.data_sampler_strategy))
+    random_loader_train_2 = create_loader(RandomSampler(dataset=datasets,mod='train',group_id=1, strategy=args.data_sampler_strategy))
+    random_loader_test_2 = create_loader(RandomSampler(dataset=datasets,mod='test',group_id=1, strategy = args.data_sampler_strategy))
     return random_loader_train_1, random_loader_test_1, random_loader_train_2, random_loader_test_2
 
 

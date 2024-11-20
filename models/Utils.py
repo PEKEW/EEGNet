@@ -25,6 +25,16 @@ regions_mapping = {
     'Parietooccipital': ['Po3', 'Po4'],  # 顶枕区
     'Occipital': ['O1', 'O2', 'Oz']  # 枕叶
 }
+colors = {
+        'Frontal': '#4299e1', 
+        'Frontocentral': '#f56565', 
+        'Central': '#9f7aea',    
+        'Temporal': '#48bb78',   
+        'Centroparietal': '#ed64a6',
+        'Parietal': '#ecc94b', 
+        'Parietooccipital': '#667eea', 
+        'Occipital': '#ed8936'
+    }
 
 class DeidentificationInput:
     """输入数据处理类"""
@@ -76,8 +86,7 @@ class ModularNMF:
     def _initialize_with_modules(self, module_mask: np.ndarray) -> np.ndarray:
         """考虑模块结构的初始化"""
         n = module_mask.shape[0]
-        H_init = np.random.rand(n, self.n_components) * 0.1
-        # 使用模块掩码调整初始值
+        H_init = np.random.rand(n, self.n_components) * 0.2
         H_init = H_init * module_mask.mean(axis=1).reshape(-1, 1)
         return H_init
 
@@ -89,7 +98,7 @@ class ModularNMF:
             n_components=self.n_components,
             init='random',  # 使用随机初始化
             solver='mu',    # 使用乘性更新规则
-            max_iter=200,
+            max_iter=800,
             random_state=Args.rand_seed
         )
         H = model.fit_transform(W, H=H_init, W=None)
@@ -156,11 +165,11 @@ class Reconstructor:
     def optimize_structure(self, W: np.ndarray, module_mask: np.ndarray) -> np.ndarray:
         """优化模块结构"""
         # 增强模块内连接
-        W = W * (1 + 0.5 * module_mask)
+        W = W * (1 + 0.1 * module_mask)
         # 抑制模块间连接
-        W = W * (1 - 0.4 * (1 - module_mask))
+        W = W * (1 - 0.62 * (1 - module_mask))
         # 添加稀疏化处理
-        threshold = 0.4  # 设置阈值
+        threshold = 0.315  # 设置阈值
         W[W < threshold] = 0  # 将小于阈值的连接置零
         # 确保值在[0,1]范围内
         W = np.clip(W, 0, 1)
@@ -227,19 +236,62 @@ class ComprehensiveDeidentification:
         metrics = self.validator.evaluate_results(W1, W2, W_common, module_mask)
         return W_common, metrics, patterns
 
-def matrix_to_connectogram_data(matrix, electrode_names, regions_mapping):
-    """将邻接矩阵转换为环形图数据结构
+def matrix_to_region_matrix(matrix, electrode_names, regions_mapping):
+    """将电极级别的连接矩阵转换为脑区级别的连接矩阵
     Args:
-        matrix: 邻接矩阵
+        matrix: 电极级别的连接矩阵 (30x30)
         electrode_names: 电极名称列表
         regions_mapping: 脑区映射字典
+    Returns:
+        region_matrix: 脑区级别的连接矩阵
+        region_names: 脑区名称列表
     """
-    # 创建图
-    if matrix.shape != (30, 30):
-        matrix = trans_triangular_to_full_matrix(matrix)
-    G = nx.from_numpy_array(matrix)
+    region_names = list(regions_mapping.keys())
+    n_regions = len(region_names)
+    region_matrix = np.zeros((n_regions, n_regions))
     
-    # 添加节点属性
+    # 创建电极到脑区的映射字典
+    electrode_to_region = {}
+    for region, electrodes in regions_mapping.items():
+        for electrode in electrodes:
+            electrode_to_region[electrode] = region
+    
+    # todo bug
+    # 计算每个脑区对之间的平均连接强度
+    for i, region1 in enumerate(region_names):
+        for j, region2 in enumerate(region_names):
+            # 获取属于这两个脑区的电极索引
+            electrodes1 = [k for k, name in enumerate(electrode_names) 
+                         if name in regions_mapping[region1]]
+            electrodes2 = [k for k, name in enumerate(electrode_names) 
+                         if name in regions_mapping[region2]]
+            
+            # 计算这两个脑区之间所有电极对的平均连接强度
+            connections = []
+            for e1 in electrodes1:
+                for e2 in electrodes2:
+                    if i != j or e1 < e2:  # 避免重复计算
+                        connections.append(matrix[e1, e2])
+            
+            region_matrix[i, j] = np.mean(connections)
+            region_matrix[j, i] = region_matrix[i, j]  # 确保矩阵对称
+    
+    return region_matrix, region_names
+
+def plot_region_connectogram(matrix, region_names, threshold=0.0001):
+    """
+    Creates a circular connectogram visualization of brain regions.
+    
+    Parameters:
+    matrix : numpy.ndarray
+        Matrix of connection strengths between brain regions
+    region_names : list
+        List of region names
+    threshold : float
+        Minimum absolute weight value to show connections
+    """
+    # 创建NetworkX图
+    G = nx.Graph()
     colors = {
         'Frontal': '#4299e1', 
         'Frontocentral': '#f56565', 
@@ -251,14 +303,297 @@ def matrix_to_connectogram_data(matrix, electrode_names, regions_mapping):
         'Occipital': '#ed8936'
     }
     
-    for i, name in enumerate(electrode_names):
-        for region, electrodes in regions_mapping.items():
-            if name in electrodes:
-                G.nodes[i]['region'] = region
-                G.nodes[i]['color'] = colors[region]
-                G.nodes[i]['name'] = name
-                break
-    return G
+    # 添加节点和边
+    for i, region in enumerate(region_names):
+        G.add_node(i, region=region, color=colors[region], name=region)
+        for j in range(i+1, len(region_names)):
+            if abs(matrix[i, j]) > threshold:
+                G.add_edge(i, j, weight=matrix[i, j])
+    
+    # 绘图部分与原来类似，但简化了标签
+    plt.figure(figsize=(10, 10))
+    ax = plt.gca()
+    n_nodes = len(G.nodes())
+    angles = np.linspace(0, 2*np.pi, n_nodes, endpoint=False)
+    radius = 1
+    pos = {i: (radius * np.cos(angle), radius * np.sin(angle)) 
+           for i, angle in enumerate(angles)}
+    
+    # 绘制区域段
+    segment_width = 2*np.pi / n_nodes
+    for i, node in enumerate(G.nodes()):
+        start_angle = angles[i] - segment_width/2
+        end_angle = angles[i] + segment_width/2
+        theta = np.linspace(start_angle, end_angle, 50)
+        inner_radius = radius * 0.9
+        outer_radius = radius * 1.15
+        
+        vertices = [(inner_radius * np.cos(t), inner_radius * np.sin(t)) for t in theta]
+        vertices.extend([(outer_radius * np.cos(t), outer_radius * np.sin(t)) 
+                        for t in theta[::-1]])
+        ax.add_patch(patches.Polygon(vertices, facecolor=G.nodes[node]['color'], 
+                                   alpha=0.3, edgecolor='none'))
+    
+    # 绘制连接
+    for (u, v, w) in G.edges(data=True):
+        start = np.array(pos[u])
+        end = np.array(pos[v])
+        diff = end - start
+        dist = np.linalg.norm(diff)
+        mid_point = (start + end) / 2
+        perp = np.array([-diff[1], diff[0]])
+        perp = perp / np.linalg.norm(perp)
+        curvature = 0.2 + 0.3 * (dist/2)
+        control_point = mid_point + curvature * perp
+        
+        path = Path([tuple(start), tuple(control_point), tuple(end)],
+                   [Path.MOVETO, Path.CURVE3, Path.CURVE3])
+        alpha = min(abs(w['weight'])*300, 0.8)
+        line_width = abs(w['weight'])*500
+        patch = patches.PathPatch(path, facecolor='none', 
+                                edgecolor=G.nodes[u]['color'],
+                                alpha=alpha, linewidth=line_width)
+        ax.add_patch(patch)
+    
+    # 绘制节点和标签
+    for i in G.nodes():
+        ax.plot(pos[i][0], pos[i][1], 'o', color=G.nodes[i]['color'],
+                markersize=8, zorder=3)
+        angle = angles[i]
+        label_radius = radius * 1.2
+        label_pos = (label_radius * np.cos(angle), label_radius * np.sin(angle))
+        ha = 'left' if -np.pi/2 <= angle <= np.pi/2 else 'right'
+        va = 'center'
+        rotation = np.degrees(angle)
+        if ha == 'right':
+            rotation += 180
+        if rotation > 90 and rotation <= 270:
+            rotation -= 180
+            
+        plt.text(label_pos[0], label_pos[1], G.nodes[i]['name'],
+                ha=ha, va=va, rotation=rotation,
+                rotation_mode='anchor', fontsize=10)
+    
+    plt.axis('equal')
+    ax.set_xlim(-1.5, 1.5)
+    ax.set_ylim(-1.5, 1.5)
+    ax.axis('off')
+    plt.title('Brain Region Connectivity', pad=20)
+    
+    return plt
+def plot_brain_connectivity_nilearn(matrix, region_names, threshold=0.0001):
+    
+    
+    """使用Nilearn绘制脑区连接图
+    
+    Args:
+        matrix: 脑区连接矩阵
+        region_names: 脑区名称列表
+        threshold: 连接强度阈值
+    
+    Returns:
+        Nilearn绘图对象
+    """
+    from nilearn import plotting
+    import pandas as pd
+    
+    
+    coords = {
+        'Frontal': (30, 45, 40),           # 前额叶，偏右侧
+        'Frontocentral': (25, 30, 55),     # 额中央区，稍偏右
+        'Central': (20, 0, 65),            # 中央区，轻微偏右
+        'Temporal': (50, -10, 0),          # 颞叶，明显偏右侧
+        'Centroparietal': (20, -30, 65),   # 中央顶区，轻微偏右
+        'Parietal': (25, -60, 55),         # 顶叶，稍偏右
+        'Parietooccipital': (30, -75, 40), # 顶枕区，偏右侧
+        'Occipital': (35, -95, 20)         # 枕叶，偏右侧
+    }
+    
+    # 创建节点坐标数组
+    node_coords = np.array([coords[region] for region in region_names])
+    
+    # 创建连接对列表
+    connections = []
+    for i in range(len(region_names)):
+        for j in range(i + 1, len(region_names)):
+            if abs(matrix[i, j]) > threshold:
+                connections.append((
+                    i, j, 
+                    matrix[i, j]
+                ))
+    
+    # 转换为pandas DataFrame
+    connections_df = pd.DataFrame(connections, columns=['source', 'target', 'weight'])
+    
+    # 创建颜色映射
+    colors = {
+        'Frontal': '#4299e1', 
+        'Frontocentral': '#f56565', 
+        'Central': '#9f7aea',    
+        'Temporal': '#48bb78',   
+        'Centroparietal': '#ed64a6',
+        'Parietal': '#ecc94b', 
+        'Parietooccipital': '#667eea', 
+        'Occipital': '#ed8936'
+    }
+    node_colors = [colors[region] for region in region_names]
+    
+    # 创建节点大小列表（可以基于连接强度调整）
+    node_sizes = [np.sum(np.abs(matrix[i])) * 100 for i in range(len(region_names))]
+    
+    # 创建绘图
+    display = plotting.plot_connectome(
+        adjacency_matrix=matrix,
+        node_coords=node_coords,
+        node_color=node_colors,
+        node_size=node_sizes,
+        edge_threshold=threshold,
+        edge_cmap='RdBu_r',
+        edge_vmin=-np.max(np.abs(matrix)),
+        edge_vmax=np.max(np.abs(matrix)),
+        title='Brain Connectivity Visualization',
+        colorbar=True
+    )
+    
+    # 添加球体表示节点
+    for i, (coord, size, color) in enumerate(zip(node_coords, node_sizes, node_colors)):
+        display.add_markers(
+            [coord],
+            marker_color=color,
+            marker_size=size
+        )
+    
+    
+    return display
+def plot_brain_connectivity_multiple_views(matrix, region_names, threshold=0.0001):
+    """绘制多视角的大脑连接图
+    
+    Args:
+        matrix: 脑区连接矩阵
+        region_names: 脑区名称列表
+        threshold: 连接强度阈值
+    """
+    from nilearn import plotting
+    import matplotlib.pyplot as plt
+    
+    
+    coords = {
+        'Frontal': (30, 45, 40),           # 前额叶，偏右侧
+        'Frontocentral': (25, 30, 55),     # 额中央区，稍偏右
+        'Central': (20, 0, 65),            # 中央区，轻微偏右
+        'Temporal': (50, -10, 0),          # 颞叶，明显偏右侧
+        'Centroparietal': (20, -30, 65),   # 中央顶区，轻微偏右
+        'Parietal': (25, -60, 55),         # 顶叶，稍偏右
+        'Parietooccipital': (30, -75, 40), # 顶枕区，偏右侧
+        'Occipital': (35, -95, 20)         # 枕叶，偏右侧
+    }
+    
+    # 创建节点坐标数组
+    node_coords = np.array([coords[region] for region in region_names])
+    
+    # 创建颜色映射
+    colors = {
+        'Frontal': '#4299e1', 
+        'Frontocentral': '#f56565', 
+        'Central': '#9f7aea',    
+        'Temporal': '#48bb78',   
+        'Centroparietal': '#ed64a6',
+        'Parietal': '#ecc94b', 
+        'Parietooccipital': '#667eea', 
+        'Occipital': '#ed8936'
+    }
+    node_colors = [colors[region] for region in region_names]
+    
+    # 固定节点大小
+    node_size = 100
+    
+    # 计算连接强度的范围用于线宽映射
+    max_weight = np.max(np.abs(matrix))
+    min_weight = np.min(np.abs(matrix))
+    
+    edge_threshold = "55.3%"
+    
+    # 创建线宽映射函数
+    def get_line_width(weight):
+        # 将连接强度映射到1-8的范围内
+        scale = (abs(weight) - min_weight) / (max_weight - min_weight)
+        return 1 + 10 * scale
+
+    # 修改矩阵，将小于阈值的连接设为0
+    matrix_thresholded = matrix.copy()
+    # matrix_thresholded[np.abs(matrix_thresholded) < threshold] = 0
+    
+    # 创建图形
+    fig = plt.figure(figsize=(20, 6))
+    
+    # 左视图
+    ax1 = plt.subplot(131)
+    plotting.plot_connectome(
+        adjacency_matrix=matrix_thresholded,
+        node_coords=node_coords,
+        node_color=node_colors,
+        node_size=node_size,
+        edge_threshold=edge_threshold,
+        edge_cmap='RdBu_r',
+        edge_vmin=-max_weight*0.8,
+        edge_vmax=max_weight*0.8,
+        display_mode='x',
+        title='Left View',
+        axes=ax1,
+    )
+    
+    # 顶视图
+    ax2 = plt.subplot(132)
+    plotting.plot_connectome(
+        adjacency_matrix=matrix_thresholded,
+        node_coords=node_coords,
+        node_color=node_colors,
+        node_size=node_size,
+        edge_threshold=edge_threshold,
+        edge_cmap='RdBu_r',
+        edge_vmin=-max_weight,
+        edge_vmax=max_weight,
+        display_mode='z',
+        title='Top View',
+        axes=ax2,
+    )
+    
+    # 前视图
+    ax3 = plt.subplot(133)
+    plotting.plot_connectome(
+        adjacency_matrix=matrix_thresholded,
+        node_coords=node_coords,
+        node_color=node_colors,
+        node_size=node_size,
+        edge_threshold=edge_threshold,
+        edge_cmap='RdBu_r',
+        edge_vmin=-max_weight,
+        edge_vmax=max_weight,
+        display_mode='y',
+        title='Front View',
+        axes=ax3,
+        colorbar=False,
+    )
+    
+    # 添加图例
+    legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
+                                label=region,
+                                markerfacecolor=color, markersize=8)
+                      for region, color in zip(region_names, node_colors)]
+    
+    # 添加连接强度图例
+    for weight in np.linspace(min_weight, max_weight, 3):
+        legend_elements.append(plt.Line2D([0], [0], color='gray', 
+                                        label=f'Strength: {weight:.3f}',
+                                        linewidth=get_line_width(weight)))
+    
+    fig.legend(handles=legend_elements, 
+              loc='center right', 
+              bbox_to_anchor=(0.98, 0.5),
+              title='Brain Regions and Connection Strengths')
+    
+    plt.tight_layout()
+    return fig
 
 def plot_connectogram(G, threshold=0.0001):
     """
@@ -276,7 +611,7 @@ def plot_connectogram(G, threshold=0.0001):
     angles = np.linspace(0, 2*np.pi, n_nodes, endpoint=False)
     radius = 1
     pos = {i: (radius * np.cos(angle), radius * np.sin(angle)) 
-           for i, angle in enumerate(angles)}
+            for i, angle in enumerate(angles)}
     def create_segment(start_angle, end_angle, radius, color):
         theta = np.linspace(start_angle, end_angle, 50)
         inner_radius = radius * 0.9
@@ -343,6 +678,40 @@ def plot_connectogram(G, threshold=0.0001):
     plt.title('Brain Region Connectogram', pad=20)
     
     return plt
+
+def matrix_to_connectogram_data(matrix, electrode_names, regions_mapping):
+    """将邻接矩阵转换为环形图数据结构
+    Args:
+        matrix: 邻接矩阵
+        electrode_names: 电极名称列表
+        regions_mapping: 脑区映射字典
+    """
+    # 创建图
+    if matrix.shape != (30, 30):
+        matrix = trans_triangular_to_full_matrix(matrix)
+    G = nx.from_numpy_array(matrix)
+    
+    # 添加节点属性
+    colors = {
+        'Frontal': '#4299e1', 
+        'Frontocentral': '#f56565', 
+        'Central': '#9f7aea',    
+        'Temporal': '#48bb78',   
+        'Centroparietal': '#ed64a6',
+        'Parietal': '#ecc94b', 
+        'Parietooccipital': '#667eea', 
+        'Occipital': '#ed8936'
+    }
+    
+    for i, name in enumerate(electrode_names):
+        for region, electrodes in regions_mapping.items():
+            if name in electrodes:
+                G.nodes[i]['region'] = region
+                G.nodes[i]['color'] = colors[region]
+                G.nodes[i]['name'] = name
+                break
+    return G
+
 
 def trans_triangular_to_full_matrix(triangular_values):
     matrix_size = 30
