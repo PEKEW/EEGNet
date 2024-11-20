@@ -3,12 +3,21 @@ from Datasets.Datasets import VRSicknessDataset, GenderSubjectSamplerMale, Gende
 from typing import Tuple
 import torch
 from Datasets.DatasetsUtils import SequenceCollator
+import numpy as np
+import random
+
 
 def get_data_loaders_random(args) -> Tuple[DataLoader]:
+    def worker_init_fn(worker_id):
+        worker_seed = args.rand_seed + worker_id
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+        torch.manual_seed(worker_seed)
     datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
     def create_loader(sampler):
         return DataLoader(
             datasets,
+            worker_init_fn=worker_init_fn,
             batch_size=args.batch_size,
             sampler=sampler,
             num_workers=args.num_workers,

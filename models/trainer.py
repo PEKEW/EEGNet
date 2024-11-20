@@ -66,11 +66,12 @@ class Trainer(object):
 
 
     def init_optimizer(self):
+        self.optimizer = 'SGD'
         if self.optimizer == 'Adam':
             self.optimizer = torch.optim.Adam(
                 self.model.parameters(), lr=self.lr)
         else:
-            self.optimizer = torch.optim.SGD(
+            self.optimizer = torch.optim.AdamW(
                 self.model.parameters(), lr=self.lr)
 
     def save(self, path, name='best_model.dic.pkl'):
@@ -174,11 +175,13 @@ class DGCNNTrainer(Trainer):
                 epoch_loss['l2_loss'] += l2_loss.item()
         
         epoch_metrics['epoch'] = epoch_num
+        
         epoch_metrics['loss'] = (
             epoch_loss['l2_loss'] + 
             epoch_loss['l1_loss'] +
-            epoch_loss['entropy_loss'] / (total_samples/self.batch_size)
-        )
+            epoch_loss['entropy_loss']
+    ) / (total_samples/self.batch_size)
+        
         epoch_metrics['num_correct'] = num_correct_predict
         epoch_metrics['acc'] = num_correct_predict / total_samples
 

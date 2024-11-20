@@ -6,21 +6,6 @@ from torch_scatter import scatter_add
 import warnings
 from models.Utils import normalize_matrix
 
-
-class DeprecatedConvDescriptor:
-    def __init__(self, _layer):
-        self.conv_layer = _layer
-
-    def __get__(self, instance, owner):
-        warnings.warn(
-            "The member is deprecated and will be removed in future versions. ",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return self.conv_layer
-
-
-
 def maybe_num_nodes(edge_idx, num_nodes=None):
     return edge_idx.max().item() + 1 if num_nodes is None else num_nodes
 
@@ -105,7 +90,7 @@ class _SGConv(SGConv):
     
 
 class DGCNN(nn.Module):
-    def __init__(self, device, num_nodes, edge_weight, edge_idx, num_features, num_hiddens, num_classes, num_layers, learnable_edge_weight=True, dropout=0.5):
+    def __init__(self, device, num_nodes, edge_weight, edge_idx, num_features, num_hiddens, num_classes, num_layers, learnable_edge_weight=True, dropout=0.5, node_learnable = False):
         """DGCNN model
         Args:
             device (torch.device): model device.
@@ -127,22 +112,40 @@ class DGCNN(nn.Module):
         edge_weight = edge_weight.reshape(self.num_nodes, self.num_nodes)[self.xs, self.ys]
         self.edge_weight = nn.Parameter(torch.Tensor(edge_weight).float(), requires_grad=learnable_edge_weight)
 
-        # 使节点是可学习的 共 node_num 个节点，每个节点使用 num_features 个特征表示
-        self.node_embedding = nn.Parameter(torch.randn(num_nodes, num_features).float(), requires_grad=True)
-        nn.init.xavier_normal_(self.node_embedding)
+
+        # self.node_learnable = node_learnable
+        self.node_learnable = True
+        if self.node_learnable:
+            self.node_embedding = nn.Parameter(torch.randn(num_nodes, num_features).float(), requires_grad=True)
+            nn.init.xavier_normal_(self.node_embedding)
+        else:
+            self.node_embedding = None
 
 
         self.dropout = dropout
+        self.dropout_layer = nn.Dropout(p=self.dropout)
         self.bn1 = nn.BatchNorm1d(num_features)
         self.conv1 = _SGConv(num_features=num_features, num_classes=num_hiddens, K=num_layers)
-
-        self.fc1 = nn.Linear(num_hiddens * num_nodes, 64)
-        self.fc2 = nn.Linear(64, num_classes)
-
-        # 已弃用
-        self.conv2 = DeprecatedConvDescriptor(nn.Conv1d(self.num_nodes, 1, 1))
-        self.fc = DeprecatedConvDescriptor(nn.Linear(num_hiddens, num_classes))
-    
+        fc_input_dim = num_hiddens * num_nodes
+        self.hidden_sizes = [
+            fc_input_dim,
+            fc_input_dim // 2,
+            # fc_input_dim // 4,
+            fc_input_dim // 8,
+            num_classes  # 输出维度
+        ]
+        
+        self.fc_layers = nn.ModuleList()
+        for i in range(len(self.hidden_sizes) - 1):
+            self.fc_layers.append(nn.Linear(self.hidden_sizes[i], self.hidden_sizes[i + 1]))
+            
+            
+        for fc in self.fc_layers:
+            nn.init.xavier_normal_(fc.weight)
+            if fc.bias is not None:
+                nn.init.zeros_(fc.bias)
+                
+                
     def append(self, edge_idx, batch_size):
         """concate a batch of graphs.
 
@@ -180,8 +183,15 @@ class DGCNN(nn.Module):
         x = x.reshape(-1, x.shape[-1])
         x = self.conv1(x, edge_idx, edge_weight)
         x = x.view((batch_size, -1))
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
+        
+        x = self.dropout_layer(x)
+        # x = self.fc1(x)
+        # x = F.relu(x)
+        # x = self.fc2(x)
+        
+        for i, fc_layer in enumerate(self.fc_layers):
+            x = fc_layer(x)
+            if i < len(self.fc_layers) - 1:
+                x = F.relu(x)
 
         return x

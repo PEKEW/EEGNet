@@ -59,32 +59,6 @@ class SequenceCollator:
             for key in self.include:
                 processed_batch[key].append(sample[key])
 
-        #     # 处理label 使用最长的key序列长度
-        #     for key in max_length.keys():
-        #         _data = sample[key]
-        #         processed_batch['label'].append(
-        #             self._pad_sequence(
-        #                 sample['label'],
-        #                 max_length[key],
-        #                 sample['label'].size()[1:])
-        #         )
-        #         processed_batch['lengths'].append(sample[key].size(0))
-
-        #     # 处理数据
-        #     # todo sample 的key调整: optical_frames -> optical ..
-        #     for key in self.include:
-        #         _data = sample[key]
-        #         processed_batch[key].append(
-        #             self._pad_sequence(
-        #                 _data,
-        #                 max_length[key],
-        #                 _data.size()[1:])
-        #         )
-
-
-        # if processed_batch['lengths']:
-        #     result['lengths'] = torch.tensor(processed_batch['lengths'])
-        #     result['label'] = torch.stack(processed_batch['label'])
         
         result = {
             'sub_id': processed_batch['sub_id'],
@@ -96,9 +70,6 @@ class SequenceCollator:
         for key in self.include:
             result[key] = torch.stack(processed_batch[key])
         
-        # for key in self.include:
-        #     if key in max_length.keys():
-        #         result[key] = torch.stack(processed_batch[key])
 
         return result
 

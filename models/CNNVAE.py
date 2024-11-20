@@ -4,13 +4,13 @@ import torch.nn.functional as F
 from Utils.Config import Args
 
 class CNNEncoder(nn.Module):
-    def __init__(self):
+    def __init__(self, args):
         super(CNNEncoder, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(3, args.channels1, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(16, args.channels2, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
-        self.batch_norm1 = nn.BatchNorm2d(16)
-        self.batch_norm2 = nn.BatchNorm2d(32)
+        self.batch_norm1 = nn.BatchNorm2d(args.channels1)
+        self.batch_norm2 = nn.BatchNorm2d(args.channels2)
         
     def forward(self, x):
         x = F.relu(self.batch_norm1(self.conv1(x)))
@@ -20,29 +20,29 @@ class CNNEncoder(nn.Module):
         return x
 
 class VAE(nn.Module):
-    def __init__(self, input_dim, latent_dim=90, node_dim=30, num_features=None):
+    def __init__(self, input_dim, args, latent_dim=90, node_dim=30, num_features=None):
         super(VAE, self).__init__()
-        if num_features is None:
-            raise ValueError("num_features must be specified")
             
         self.node_dim = node_dim
         self.num_features = num_features
         self.edge_dim = node_dim * node_dim  # 30 * 30 = 900
         self.output_dim = self.edge_dim + node_dim * num_features
+        hidden_size = args.hidden_size
+        dp = args.vae_dropout
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, 256),
+            nn.Linear(input_dim, hidden_size),
             nn.ReLU(),
-            nn.BatchNorm1d(256),
-            nn.Dropout(0.3)
+            nn.BatchNorm1d(hidden_size),
+            nn.Dropout(dp)
         )
-        self.fc_mu = nn.Linear(256, latent_dim)
-        self.fc_logvar = nn.Linear(256, latent_dim)
+        self.fc_mu = nn.Linear(hidden_size, latent_dim)
+        self.fc_logvar = nn.Linear(hidden_size, latent_dim)
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, 256),
+            nn.Linear(latent_dim, hidden_size),
             nn.ReLU(),
-            nn.BatchNorm1d(256),
-            nn.Dropout(0.3),
-            nn.Linear(256, self.output_dim)
+            nn.BatchNorm1d(hidden_size),
+            nn.Dropout(dp),
+            nn.Linear(hidden_size, self.output_dim)
         )
         
     def encode(self, x):
@@ -70,14 +70,15 @@ class VAE(nn.Module):
         edge_repr, node_repr = self.decode(z)
         return edge_repr, node_repr, mu, logvar
 
-class CompleteModel(nn.Module):
+class CNNVAE(nn.Module):
     def __init__(self, input_size=(64, 64), node_dim=30, num_features=Args.num_features, 
-                 latent_dim=90, dropout_rate=0.5, weight_decay=1e-5):
-        super(CompleteModel, self).__init__()
+                latent_dim=90, dropout_rate=0.5, weight_decay=1e-5):
+        super(CNNVAE, self).__init__()
+        self.args = Args()
         self.weight_decay = weight_decay
         self.node_dim = node_dim
         self.num_features = num_features
-        self.cnn = CNNEncoder(dropout_rate=dropout_rate)
+        self.cnn = CNNEncoder(self.args)
         dummy_input = torch.zeros(1, 3, input_size[0], input_size[1])
         with torch.no_grad():
             cnn_output = self.cnn(dummy_input)
@@ -86,28 +87,40 @@ class CompleteModel(nn.Module):
             input_dim=flattened_size,
             latent_dim=latent_dim,
             node_dim=node_dim,
-            num_features=num_features
+            num_features=num_features,
+            args = self.args
         )
-        self.graph_conv = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1),
+        self.edge_processor = nn.Sequential(
+            nn.Linear(node_dim * node_dim, self.args.edge_hidden_size),
             nn.ReLU(),
-            nn.BatchNorm2d(16),
-            nn.MaxPool2d(2, 2)
+            nn.BatchNorm1d(self.args.edge_hidden_size),
+            nn.Dropout(dropout_rate)
         )
         self.node_processor = nn.Sequential(
-            nn.Linear(num_features, 32),
+            nn.Linear(num_features, self.args.node_hidden_size),
             nn.ReLU(),
-            nn.BatchNorm1d(32),
+            nn.BatchNorm1d(self.args.node_hidden_size),
             nn.Dropout(dropout_rate)
         )
         
-        graph_feature_size = 16 * (node_dim//2) * (node_dim//2) 
-        node_feature_size = 32 * node_dim  
-        combined_size = graph_feature_size + node_feature_size + latent_dim
+        combined_size = self.args.edge_hidden_size + self.args.node_hidden_size
         
         # 分类器
         self.classifier = nn.Sequential(
             nn.Linear(combined_size, 256),
+            nn.ReLU(),
+            nn.BatchNorm1d(256),
+            nn.Dropout(dropout_rate),
+            nn.Linear(256, 64),
+            nn.ReLU(),
+            nn.BatchNorm1d(64),
+            nn.Dropout(dropout_rate),
+            nn.Linear(64, 2)
+        )
+        
+        
+        self.classifier_only_video = nn.Sequential(
+            nn.Linear(2048, 256),
             nn.ReLU(),
             nn.BatchNorm1d(256),
             nn.Dropout(dropout_rate),
@@ -126,26 +139,47 @@ class CompleteModel(nn.Module):
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
     
-    def process_graph_features(self, edge_repr):
-        edge_repr = edge_repr.unsqueeze(1)  # [batch, 1, node_dim, node_dim]
-        graph_features = self.graph_conv(edge_repr)
-        return graph_features.view(edge_repr.size(0), -1)
+    def process_edge_features(self, edge_repr):
+        batch_size = edge_repr.size(0)
+        return edge_repr.reshape(batch_size, -1)
+        # graph_features = self.edge_processor(edge_repr.reshape(32,-1))
+        # return graph_features.view(edge_repr.size(0), -1)
     
     def process_node_features(self, node_repr):
         batch_size = node_repr.size(0)
-        node_features = self.node_processor(node_repr.view(-1, self.num_features))
-        return node_features.view(batch_size, -1)
+        return node_repr.reshape(batch_size, -1)
+        # node_features = self.node_processor(node_repr.reshape(batch_size, -1))
+        # return node_features.view(batch_size, -1)
     
-    def forward(self, x):
+    
+    
+    # mark only video forward edition
+    def forward(self, original, optical):
+        x = original if original is not None else optical
+        x = x.mean(dim=1)
         cnn_features = self.cnn(x)
         cnn_features = cnn_features.view(x.size(0), -1)
-        edge_repr, node_repr, mu, logvar = self.vae(cnn_features)
-        graph_features = self.process_graph_features(edge_repr)
-        node_features = self.process_node_features(node_repr)
-        combined_features = torch.cat([graph_features, node_features, mu], dim=1)
-        output = self.classifier(combined_features)
-        
-        return output, edge_repr, node_repr, mu, logvar
+        output = self.classifier_only_video(cnn_features)
+        return output, None, None, None, None
+    
+    # mark cnn vae forward edition
+    # def forward(self, original, optical):
+    #     # todo 把32这种硬编码的数字改成参数 放在config里面
+    #     # todo 这里需要有一个batch size 和 device参数
+    #     x1 = original if original is not None else torch.zeros(32, 29, 3, 32, 32)
+    #     x2 = optical if optical is not None else torch.zeros(32, 29, 3, 32, 32)
+    #     # todo 这里在最终调整网络模型的时候需要改成attention机制
+    #     x = x1.to(torch.device('cuda')) + x2.to(torch.device('cuda'))
+    #     x = x.mean(dim=1)
+    #     cnn_features = self.cnn(x)
+    #     cnn_features = cnn_features.view(x.size(0), -1)
+    #     edge_repr, node_repr, *_= self.vae(cnn_features)
+    #     node_features = self.process_node_features(node_repr)
+    #     edge_features = self.process_edge_features(edge_repr)
+    #     combined_features = torch.cat([edge_features, node_features], dim=1)
+    #     output = self.classifier(combined_features)
+    #     return output, edge_repr
+    
     
     def get_l1_l2_regularization(self):
         """计算L1和L2正则化损失"""
@@ -162,11 +196,11 @@ class CompleteModel(nn.Module):
         """计算VAE损失"""
         edge_loss = F.mse_loss(recon_edge.view(recon_edge.size(0), -1), 
                               orig_features[:, :self.node_dim * self.node_dim], 
-                              reduction='mean')
+                            reduction='mean')
         
         node_loss = F.mse_loss(recon_node.view(recon_node.size(0), -1),
                               orig_features[:, self.node_dim * self.node_dim:],
-                              reduction='mean')
+                            reduction='mean')
         
         # KL散度
         kld = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())

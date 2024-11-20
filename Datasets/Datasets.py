@@ -25,24 +25,16 @@ from Utils.Config import Args
 
 class RandomSampler(Sampler):
     init_list = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
-    def __init__(self, dataset, strategy = 'down', group1 = [], group2 = [], mod = 'train', group_id = 0):
-        """随机对被试采样
-
-        Args:
-            dataset (Dataset): 数据集
-            strategy (str, optional): 平衡样本的方法 上采样补全 下采样截断 可选 up|down. Defaults to 'down'.
-            group1 (list, optional): group1的被试ID 如果为空则随机填充. Defaults to [].
-            group2 (list, optional): 同group1. Defaults to [].
-            mod (str, optional): 训练还是测试：可选 train | test. Defaults to 'train'.
-            group_id (int, optional): 选择当前的分组是 0 | 1. Defaults to 0.
-        """
+    def __init__(self, dataset, strategy = 'up', group1 = [], group2 = [], mod = 'train', group_id = 0):
+        rng = random.Random(Args.rand_seed)
         self.dataset = dataset
         self.indices = []
         self.mod = mod
         if group1 == [] or group2 == []:
             random.shuffle(self.init_list)
             group1 = self.init_list[:len(self.init_list) // 2]
-            group2 = self.init_list[len(self.init_list) // 2:]
+            # group2 = self.init_list[len(self.init_list) // 2:]
+            group2 = group1 = self.init_list
         self.group1 = group1
         self.group2 = group2
         self.strategy = strategy
@@ -50,26 +42,39 @@ class RandomSampler(Sampler):
         _list = self.group1 if self.id == 0 else self.group2
         positive_indices = []
         negative_indices = []
-        for i, (sub_id, slice_id) in enumerate(dataset.samples):
+        
+        sorted_samples = sorted(enumerate(dataset.samples), 
+                                key=lambda x: (x[1][0], x[1][1]))
+        self.sorted_indices = [x[0] for x in sorted_samples]
+        
+        positive_indices = []
+        negative_indices = []
+        for i in self.sorted_indices:
+            sub_id, slice_id = dataset.samples[i]
             if sub_id in _list:
                 label = dataset.labels[sub_id][f"slice_{slice_id}"]
                 if label == 1:
                     positive_indices.append(i)
                 else:
                     negative_indices.append(i)
+        
+        
         pos_size = len(positive_indices)
         neg_size = len(negative_indices)
         target_size = max(pos_size, neg_size) if self.strategy == 'up' else min(pos_size, neg_size)
+        
+        
+        
         if pos_size > target_size:
-            positive_indices = random.sample(positive_indices, target_size)
+            positive_indices = rng.sample(positive_indices, target_size)
         elif pos_size < target_size:
-            positive_indices = random.choices(positive_indices, k=target_size)
+            positive_indices = rng.choices(positive_indices, k=target_size)
         if neg_size > target_size:
-            negative_indices = random.sample(negative_indices, target_size)
+            negative_indices = rng.sample(negative_indices, target_size)
         elif neg_size < target_size:
-            negative_indices = random.choices(negative_indices, k=target_size)
+            negative_indices = rng.choices(negative_indices, k=target_size)
         self.indices = positive_indices + negative_indices
-        random.shuffle(self.indices)
+        rng.shuffle(self.indices)
         balanced_labels = [dataset.labels[dataset.samples[i][0]][f"slice_{dataset.samples[i][1]}"] for i in self.indices]
 
         train_indices, test_indices = train_test_split(
@@ -82,6 +87,17 @@ class RandomSampler(Sampler):
         
         self.train_indices = train_indices
         self.test_indices = test_indices
+        
+        with open('train_indices.json', 'w') as f:
+            samples = [(i, self.dataset.samples[i][0], self.dataset.samples[i][1]) for i in self.train_indices]
+            
+            for idx, sub_id , slice_id in samples:
+                f.write(f"{idx}, {sub_id},{slice_id}\n")
+                
+        with open('test_indices.json', 'w') as f:
+            samples = [(i, self.dataset.samples[i][0], self.dataset.samples[i][1]) for i in self.test_indices]
+            for idx, sub_id , slice_id in samples:
+                f.write(f"{idx}, {sub_id},{slice_id}\n")
 
 
     def __iter__(self):
@@ -234,9 +250,9 @@ class VRSicknessDataset(Dataset):
             original_frame_slices = set(self.SLICE_ID_PATTERN_TYPO.search(f).group(1)
                                 for f in frame_files if 'optical.png' in f)
             optical_frame_slices = set(self.SLICE_ID_PATTERN_TYPO.search(f).group(1)
-                                 for f in frame_files if 'optical.png' in f)
+                                for f in frame_files if 'optical.png' in f)
             eeg_slices = set(self.SLICE_ID_PATTERN.search(f).group(1)
-                             for f in eeg_files if f.endswith('.set'))
+                            for f in eeg_files if f.endswith('.set'))
             motion_slices = set(self.SLICE_ID_PATTERN.search(k).group(1)
                                 for k in self.motion_data[sub_id].keys())
             valid_slices = optical_frame_slices & original_frame_slices & eeg_slices & motion_slices
@@ -304,7 +320,6 @@ class VRSicknessDataset(Dataset):
                         warnings.simplefilter("ignore")
                         raw = mne.io.read_raw_eeglab(f'/tmp/{set_name}', preload=True)
                     data = raw.get_data()
-                    # self.eeg_data[sub_id][slice_id] = torch.FloatTensor(data)
                     data_tensor = torch.FloatTensor(data)
                     _mean = data_tensor.mean(dim=1, keepdim=True)
                     _std = data_tensor.std(dim=1, keepdim=True)
