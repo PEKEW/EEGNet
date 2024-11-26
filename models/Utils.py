@@ -13,6 +13,7 @@ from matplotlib.path import Path
 from Utils.Config import Args
 from scipy.optimize import linear_sum_assignment
 import matplotlib.patches as patches
+from sklearn.preprocessing import normalize
 
 total_part = '''Fp1 Fp2 Fz F3 F4 F7 F8 Fc1 Fc2 Fc5 Fc6 Cz C3 C4 T7 T8 Cp1 Cp2 Cp5 Cp6 Pz P3 P4 P7 P8 Po3 Po4 Oz O1 O2'''.split()
 regions_mapping = {
@@ -213,6 +214,115 @@ class Validator:
         }
         return metrics
 
+
+
+class CommonExtraction:
+    """
+    # mark 重构
+    min ||G1 - W * H1||^2 + ||G2 - W * H2||^2
+    s.t. W >= 0, H1 >= 0, H2 >= 0
+    numerator = G1@H1.T + G2@H2.T
+    denominator = (H1@H1.T + H2@H2.T ) @ W
+    W := W * numerator / (denominator + eps)
+    现在的思路基于NMF的思想，使用乘法法则和迭代求和G1 G2相同形状的基底W和分别的激活矩阵H1和H2
+    基本思想：基底需要一致 但是允许每个图有自己的激活模型
+    共同特征一定会在H1和H2中表现出相似的激活模式
+    最后使用JS散度求H1和H2的强共同激活模式
+    不能对H1和H2进行相似约束的原因是：可能会强制把G1独特模式mapping到H2上
+    反之同理，这会削弱每个激活模式的独特性
+    """
+    def __init__(self, G1, G2, max_iter=100):
+        self.eps = 1e-10
+        self.G1 = G1
+        self.G2 = G2
+        _shape = G1.shape
+        W = np.random.rand(_shape[0], _shape[1])
+        H1 = np.random.rand(_shape[0], _shape[1])
+        H2 = np.random.rand(_shape[0], _shape[1])
+        self.max_iter = max_iter
+        
+        self.W = normalize(W, axis=0)
+        self.H1 = normalize(H1, axis=0)
+        self.H2 = normalize(H2, axis=0)
+        
+        self.patten_analysis = []
+    
+    def _get_common_base(self):
+        for _ in range(self.max_iter):
+            W_old = self.W.copy()
+            H1_old = self.H1.copy()
+            H2_old = self.H2.copy()
+            
+            numerator = np.dot(self.G1, self.H1.T) + np.dot(self.G2, self.H2.T)
+            denominator = np.dot(self.W, np.dot(self.H1, self.H1.T) + np.dot(self.H2, self.H2.T))
+            self.W *= numerator / (denominator + self.eps)
+            
+            numerator = np.dot(self.W.T, self.G1)
+            denominator = np.dot(np.dot(self.W.T, self.W), self.H1)
+            self.H1 *= numerator / (denominator + self.eps)
+            
+            numerator = np.dot(self.W.T, self.G2)
+            denominator = np.dot(np.dot(self.W.T, self.W), self.H2)
+            self.H2 *= numerator / (denominator + self.eps)
+            
+            W_diff = np.linalg.norm(self.W - W_old) / np.linalg.norm(self.W)
+            H1_diff = np.linalg.norm(self.H1 - H1_old) / np.linalg.norm(self.H1)
+            H2_diff = np.linalg.norm(self.H2 - H2_old) / np.linalg.norm(self.H2)
+            
+            if max(W_diff, H1_diff, H2_diff) < 1e-4:
+                break
+        return self.W, self.H1, self.H2
+        
+    @staticmethod
+    def normalize_smooth(x, eps = 1e-10):
+        x += eps
+        return x / x.sum()
+    
+    @staticmethod
+    def js_divergence(p, q):
+        p = CommonExtraction.normalize_smooth(p)
+        q = CommonExtraction.normalize_smooth(q)
+        m = (p + q) / 2
+        return 0.5 * np.sum(p * np.log(p / m)) + 0.5 * np.sum(q * np.log(q / m))
+        
+    def _get_common_activation(self):
+        # todo 检查这个维度
+        k = self.H1.shape[0]
+        
+        for i in range(k):
+            act1 = self.H1[i,:]
+            act2 = self.H2[i,:]
+            
+            js_div = CommonExtraction.js_divergence(act1, act2)
+            self.patten_analysis.append(
+                {
+                    'pattern_idx': i,
+                    'js_div': js_div,
+                    'G1_activation': act1,
+                    'G2_activation': act2
+                }
+            )
+    def _identify_common_pattern(self):
+        
+        for pattern in self.patten_analysis:
+            # todo 调整这个阈值
+            if pattern['js_div'] < 0.1:
+                pattern['pattern_type'] = 'Common'
+            else:
+                pattern['pattern_type'] = 'Distinct'
+                
+    def _get_common_matrix(self) -> np.array:
+        # 把H1和H2的对应的pattern_type的Common的激活模式平均得到H_common对应的部分，其余部分是0
+        # 然后 *W 得到GCommon
+        H_common = np.zeros_like(self.H1)
+        for pattern in self.patten_analysis:
+            if pattern['pattern_type'] == 'Common':
+                H_common[pattern['pattern_idx'], :] = (pattern['G1_activation'] + pattern['G2_activation']) / 2
+        G_common = np.dot(self.W, H_common)
+        return G_common
+        
+        
+        
 class ComprehensiveDeidentification:
     """完整的去个性化处理类"""
     def __init__(self, n_components: int = 10):
@@ -262,9 +372,9 @@ def matrix_to_region_matrix(matrix, electrode_names, regions_mapping):
         for j, region2 in enumerate(region_names):
             # 获取属于这两个脑区的电极索引
             electrodes1 = [k for k, name in enumerate(electrode_names) 
-                         if name in regions_mapping[region1]]
+                        if name in regions_mapping[region1]]
             electrodes2 = [k for k, name in enumerate(electrode_names) 
-                         if name in regions_mapping[region2]]
+                        if name in regions_mapping[region2]]
             
             # 计算这两个脑区之间所有电极对的平均连接强度
             connections = []

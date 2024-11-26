@@ -5,18 +5,18 @@ FPS = 30-1
 # todo 这里要考虑不同长度的序列 而且要考虑不同的数据类型
 class SequenceCollator:
     def __init__(self,
-                 sequence_length=None,
-                 padding_mode='zero',
-                 include=['eeg','label','optical', 'original']):
+                sequence_length=None,
+                padding_mode='zero',
+                include=['eeg','label','optical', 'original']):
         self.sequence_length = sequence_length
         self.padding_mode = padding_mode
         self.include = include
 
     
     def _pad_sequence(self, 
-                     sequence: torch.Tensor, 
-                     max_length: int, 
-                     pad_dims: tuple) -> torch.Tensor:
+                    sequence: torch.Tensor, 
+                    max_length: int, 
+                    pad_dims: tuple) -> torch.Tensor:
         curr_length = sequence.size(0)
         if curr_length > max_length:
             return sequence[:max_length]

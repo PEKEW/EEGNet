@@ -32,8 +32,8 @@ class Args:
         self.num_layers = 3
         self.clip_norm = 3
         
-        self.mod = ['eeg'] # 数据集加载的模态: 可选项: eeg | optical | original | motion
-        self.group_mod = 'random' # 正则化图的分组方法: 可选项: gender | random
+        self.mod = ['original'] # 数据集加载的模态: 可选项: eeg | optical | original | motion
+        self.model_mod = 'cnn' # cnn | eeg_group
         self.n_folds = None
         self.n_per = None
         self.sec = None
@@ -41,6 +41,23 @@ class Args:
         self.now_time = None
         self.model_path = None
         self.sub_list = None
+        
+        self.channels1 = 16
+        self.channels2 = 32
+        
+        # VAE 参数
+        self.hidden_size = 256
+        self.vae_dropout = 0.5
+        
+        # CNNVAE 参数
+        # todo edge是对称矩阵 减少参数
+        self.edge_hidden_size = 900
+        self.node_hidden_size = 250*30
+        
+        self.num_epochs_video = 50
+        
+        
+        # self.video_include = ['original']
 
 
     def __getitem__(self, key):
@@ -52,13 +69,13 @@ class Args:
 
 def init():
     config = Args()
-    torch.manual_seed(config.rand_seed)
-    torch.cuda.manual_seed(config.rand_seed)
-    torch.cuda.manual_seed_all(config.rand_seed)
-    np.random.seed(config.rand_seed)
-    random.seed(config.rand_seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    torch.cuda.synchronize()
-    torch.backends.cudnn.enabled = False
+    # torch.manual_seed(config.rand_seed)
+    # torch.cuda.manual_seed(config.rand_seed)
+    # torch.cuda.manual_seed_all(config.rand_seed)
+    # np.random.seed(config.rand_seed)
+    # random.seed(config.rand_seed)
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
+    # torch.cuda.synchronize()
+    # torch.backends.cudnn.enabled = False
     return config

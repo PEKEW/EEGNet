@@ -1,71 +1,80 @@
 import torch
 import Utils
 import Utils.Config
-from Datasets.DataloaderUtils import get_data_loaders_gender, get_data_loaders_random
+from Datasets.DataloaderUtils import get_data_loader_cnn, get_data_loaders_eeg
 import models.trainer as Trainer
-from models.DGCNN import DGCNN
-from models.CNNVAE import CNNVAE
-
-def get_model(args, edge_wight, edge_idx):
-    return DGCNN(
-        device=torch.device('cuda' if not args.cpu else 'cpu'),
-        num_nodes=args.num_nodes,
-        edge_weight=edge_wight,
-        edge_idx=edge_idx,
-        num_features=args.num_features,
-        num_classes=args.num_classes,
-        num_hiddens=args.num_hiddens,
-        num_layers=args.num_layers,
-    )
+from models.DGCNN import get_eeg_model
+from models.CNNVAE import get_cnn_model
     
-    
-def get_cnn_model():
-    return CNNVAE(
-        input_size=(32,32)
-    )
 
-def main(args):
+
+def train(args):
     device = torch.device('cuda' if not args.cpu else 'cpu')
     print("=" * 50)
-    print("训练正则化图")
-
-    # 获取数据加载器
-    if args.group_mod == 'gender':
-        group1, group2 = get_data_loaders_gender(args)
-    else:
-        train_loaders = get_data_loaders_random(args)
-        group1, group2 = train_loaders[:2], train_loaders[2:]
-
-    # 创建和训练模型
     def setup_trainer(loader, args):
         trainer = Trainer.get_trainer(args)
         trainer._set_data_loader(loader)
-        model = get_model(args, trainer.edge_weight, trainer.edge_index).to(device)
+        model = get_eeg_model(args, trainer.edge_weight, trainer.edge_index).to(device)
         trainer._set_model(model)
         trainer.init_optimizer()
         return trainer
-
-    # trainers = [setup_trainer(loader, args) for loader in [group1[0], group2[0]]]
-    trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
     
-    # 训练循环
-    for epoch in range(args.num_epochs):
-        print(f"Epoch {epoch}")
-        metrics = [trainer._train_with_eeg(args, epoch) for trainer in trainers]
-        for i, metric in enumerate(metrics, 1):
-            print(f"Group{i}: {metric}")
-    print("=" * 50)
-
-    # 测试阶段
-    test_metrics = []
-    # for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1], group2[1]]), 1):
-    for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1]]), 1):
+    if args.model_mod == 'cnn':
+        train_loader, test_loader = get_data_loader_cnn(args)
+        
+        trainer = Trainer.get_trainer(args)
+        trainer._set_data_loader(train_loader)
+        model = get_cnn_model().to(device)
+        trainer._set_model(model)
+        trainer.init_optimizer()
+        for epoch in range(args.num_epochs_video):
+            print(f"Epoch {epoch}")
+            metrics = trainer._train_with_video(args, epoch)
+        print(f"Train: {metrics}")
+    
         tester = Trainer.get_trainer(args)
         tester._set_data_loader(test_loader)
         tester._set_model(trainer.get_model())
-        metric = tester._test_with_eeg(args)
-        test_metrics.append(metric)
-        print(f"Group{i} Test: {metric}")
+        # model = torch.load('test.pkl')
+        model = model.to(device)
+        model.eval()
+        tester._set_model(model)
+        metric = tester._test_with_video(args)
+        print(f"Test: {metric}")
+        
+        
+    elif args.model_mod == 'eeg_group':
+        train_loaders = get_data_loaders_eeg(args)
+        group1, group2 = train_loaders[:2], train_loaders[2:]
+
+        trainers = [setup_trainer(loader, args) for loader in [group1[0], group2[0]]]
+        # trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
+        
+        # 训练循环
+        for epoch in range(args.num_epochs):
+            print(f"Epoch {epoch}")
+            metrics = [trainer._train_with_eeg(args, epoch) for trainer in trainers]
+            for i, metric in enumerate(metrics, 1):
+                print(f"Group{i}: {metric}")
+        print("=" * 50)
+
+        test_metrics = []
+        for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1], group2[1]]), 1):
+        # for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1]]), 1):
+            tester = Trainer.get_trainer(args)
+            tester._set_data_loader(test_loader)
+            tester._set_model(trainer.get_model())
+            metric = tester._test_with_eeg(args)
+            test_metrics.append(metric)
+            print(f"Group{i} Test: {metric}")
+    
+    elif args.mod == 'eeg':
+        pass
+
+
+
+def main(args):
+    train(args)
 
 
     # trained_model1 = group1_trainer.get_model()

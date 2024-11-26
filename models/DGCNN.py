@@ -185,9 +185,6 @@ class DGCNN(nn.Module):
         x = x.view((batch_size, -1))
         
         x = self.dropout_layer(x)
-        # x = self.fc1(x)
-        # x = F.relu(x)
-        # x = self.fc2(x)
         
         for i, fc_layer in enumerate(self.fc_layers):
             x = fc_layer(x)
@@ -195,3 +192,16 @@ class DGCNN(nn.Module):
                 x = F.relu(x)
 
         return x
+    
+
+def get_eeg_model(args, edge_wight, edge_idx):
+    return DGCNN(
+        device=torch.device('cuda' if not args.cpu else 'cpu'),
+        num_nodes=args.num_nodes,
+        edge_weight=edge_wight,
+        edge_idx=edge_idx,
+        num_features=args.num_features,
+        num_classes=args.num_classes,
+        num_hiddens=args.num_hiddens,
+        num_layers=args.num_layers,
+    )

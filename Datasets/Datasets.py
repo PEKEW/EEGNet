@@ -4,7 +4,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 import warnings
 import torch
-from torch.utils.data import Dataset, DataLoader, Sampler
+from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 import os
 import json
@@ -12,198 +12,12 @@ import tarfile
 import mne
 from pathlib import Path
 import re
-from pathlib import Path
 import tarfile
 import mne
 import torch
 from PIL import Image
 import torchvision.transforms as transforms
 from Datasets.DatasetsUtils import SequenceCollator
-import random
-from sklearn.model_selection import train_test_split
-from Utils.Config import Args
-
-class RandomSampler(Sampler):
-    init_list = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
-    def __init__(self, dataset, strategy = 'up', group1 = [], group2 = [], mod = 'train', group_id = 0):
-        rng = random.Random(Args.rand_seed)
-        self.dataset = dataset
-        self.indices = []
-        self.mod = mod
-        if group1 == [] or group2 == []:
-            random.shuffle(self.init_list)
-            group1 = self.init_list[:len(self.init_list) // 2]
-            # group2 = self.init_list[len(self.init_list) // 2:]
-            group2 = group1 = self.init_list
-        self.group1 = group1
-        self.group2 = group2
-        self.strategy = strategy
-        self.id = group_id
-        _list = self.group1 if self.id == 0 else self.group2
-        positive_indices = []
-        negative_indices = []
-        
-        sorted_samples = sorted(enumerate(dataset.samples), 
-                                key=lambda x: (x[1][0], x[1][1]))
-        self.sorted_indices = [x[0] for x in sorted_samples]
-        
-        positive_indices = []
-        negative_indices = []
-        for i in self.sorted_indices:
-            sub_id, slice_id = dataset.samples[i]
-            if sub_id in _list:
-                label = dataset.labels[sub_id][f"slice_{slice_id}"]
-                if label == 1:
-                    positive_indices.append(i)
-                else:
-                    negative_indices.append(i)
-        
-        
-        pos_size = len(positive_indices)
-        neg_size = len(negative_indices)
-        target_size = max(pos_size, neg_size) if self.strategy == 'up' else min(pos_size, neg_size)
-        
-        
-        
-        if pos_size > target_size:
-            positive_indices = rng.sample(positive_indices, target_size)
-        elif pos_size < target_size:
-            positive_indices = rng.choices(positive_indices, k=target_size)
-        if neg_size > target_size:
-            negative_indices = rng.sample(negative_indices, target_size)
-        elif neg_size < target_size:
-            negative_indices = rng.choices(negative_indices, k=target_size)
-        self.indices = positive_indices + negative_indices
-        rng.shuffle(self.indices)
-        balanced_labels = [dataset.labels[dataset.samples[i][0]][f"slice_{dataset.samples[i][1]}"] for i in self.indices]
-
-        train_indices, test_indices = train_test_split(
-            self.indices,
-            random_state=Args.rand_seed,
-            test_size=0.3,
-            shuffle=True,
-            stratify=balanced_labels
-        )
-        
-        self.train_indices = train_indices
-        self.test_indices = test_indices
-        
-        with open('train_indices.json', 'w') as f:
-            samples = [(i, self.dataset.samples[i][0], self.dataset.samples[i][1]) for i in self.train_indices]
-            
-            for idx, sub_id , slice_id in samples:
-                f.write(f"{idx}, {sub_id},{slice_id}\n")
-                
-        with open('test_indices.json', 'w') as f:
-            samples = [(i, self.dataset.samples[i][0], self.dataset.samples[i][1]) for i in self.test_indices]
-            for idx, sub_id , slice_id in samples:
-                f.write(f"{idx}, {sub_id},{slice_id}\n")
-
-
-    def __iter__(self):
-        return iter(self.train_indices if self.mod == 'train' else self.test_indices)
-    def __len__(self):
-        return len(self.train_indices) if self.mod == 'train' else len(self.test_indices)
-    
-
-# todo trans sampler class 2 new sampler file
-
-class GenderSubjectSampler(Sampler):
-    male_sub_list = ['TYR', 'XSJ', 'CM', 'SHQ', 'LMH', 'LZX', 'LJ', 'WZT']
-    female_sub_list = ['TX', 'HZ', 'GKW', 'LMH', 'WJX', 'CGW', 'YHY', 'LZY']
-    def __init__(self, dataset, strategy = 'down'):
-        """
-            strategy (str, optional): down | up. Defaults to 'down'.
-        """
-        self.dataset = dataset
-        self.indices = []
-    def __iter__(self):
-        return iter(self.indices)
-    def __len__(self):
-        return len(self.indices)
-
-class GenderSubjectSamplerMale(GenderSubjectSampler):
-    def __init__(self, dataset, strategy = 'down'):
-        super().__init__(dataset, strategy=strategy)
-        positive_indices = [
-            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.male_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 1)
-        ]
-        negative_indices = [
-            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.male_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 0)
-        ]
-        pos_size = len(positive_indices)
-        neg_size = len(negative_indices)
-        target_size = max(pos_size, neg_size) if strategy == 'up' else min(pos_size, neg_size)
-        if pos_size > target_size:
-            positive_indices = random.sample(positive_indices, target_size)
-        elif pos_size < target_size:
-            positive_indices = random.choices(positive_indices, k=target_size)
-        if neg_size > target_size:
-            negative_indices = random.sample(negative_indices, target_size)
-        elif neg_size < target_size:
-            negative_indices = random.choices(negative_indices, k=target_size)
-
-        self.indices = positive_indices + negative_indices
-        random.shuffle(self.indices)
-
-class GenderSubjectSamplerFemale(GenderSubjectSampler):
-    def __init__(self, dataset, strategy = 'down'):
-        super().__init__(dataset, strategy=strategy)
-        positive_indices = [
-            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.female_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 1)
-        ]
-        negative_indices = [
-            i for i, (sub_id, slice_id) in enumerate(dataset.samples)
-            if (sub_id in self.female_sub_list) and (dataset.labels[sub_id][f"slice_{slice_id}"] == 0)
-        ]
-        pos_size = len(positive_indices)
-        neg_size = len(negative_indices)
-        target_size = max(pos_size, neg_size) if strategy == 'up' else min(pos_size, neg_size)
-        if pos_size > target_size:
-            positive_indices = random.sample(positive_indices, target_size)
-        elif pos_size < target_size:
-            positive_indices = random.choices(positive_indices, k=target_size)
-        if neg_size > target_size:
-            negative_indices = random.sample(negative_indices, target_size)
-        elif neg_size < target_size:
-            negative_indices = random.choices(negative_indices, k=target_size)
-
-        self.indices = positive_indices + negative_indices
-        random.shuffle(self.indices)
-
-class InterSubjectSampler(Sampler):
-    """跨被试采样器"""
-    def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
-        self.dataset = dataset
-        self.fold = fold
-        self.sub_list = sub_list
-        self.n_subs = len(sub_list)
-        self.n_per = n_per
-        self.is_train = is_train
-        
-        val_start = n_per * fold
-        val_end = min(n_per * (fold + 1), self.n_subs)
-        val_subs = set(self.sub_list[val_start:val_end])
-        
-        self.indices = [
-            i for i, (sub_id, _) in enumerate(dataset.samples)
-            if (sub_id in val_subs) != is_train
-        ]
-    
-    def __iter__(self):
-        return iter(self.indices)
-    def __len__(self):
-        return len(self.indices)
-
-class ExtraSubjectSampler(Sampler):
-    def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
-        pass
-    def __iter__(self):
-        raise NotImplementedError("ExtraSubjectSampler is not implemented yet.")
-
 
 
 class VRSicknessDataset(Dataset):
@@ -368,11 +182,10 @@ class VRSicknessDataset(Dataset):
         sub_id, slice_id = self.samples[idx]
         
         try:
-            # todo video -> optical, original 统一一下mod 不是video 而是optical和original等
-            if 'video' in self.mod:
+            if 'original' in self.mod:
                 optical_frames, original_frames = self._load_frames(sub_id, slice_id)
-            else:
-                optical_frames, original_frames = None, None
+            elif 'optical' in self.mod:
+                optical_frames, original_frames = self._load_frames(sub_id, slice_id)
             if 'log' in self.mod:
                 motion_data = self._load_motion(sub_id, slice_id)
             else:
@@ -383,9 +196,9 @@ class VRSicknessDataset(Dataset):
             return {
                 'sub_id': sub_id,
                 'slice_id': slice_id,
-                'optical_frames': optical_frames,
-                'original_frames': original_frames,
-                'eeg': self.eeg_data[sub_id][slice_id],
+                'optical': optical_frames,
+                'original': original_frames,
+                'eeg': self.eeg_data[sub_id][slice_id] if 'eeg' in self.mod else None,
                 'motion': motion_data,
                 'label': labels
             }

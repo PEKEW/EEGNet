@@ -4,18 +4,40 @@ import torch.nn.functional as F
 from Utils.Config import Args
 
 class CNNEncoder(nn.Module):
+    # def __init__(self, args):
+    #     super(CNNEncoder, self).__init__()
+    #     self.conv1 = nn.Conv2d(3, args.channels1, kernel_size=3, padding=1)
+    #     self.conv2 = nn.Conv2d(16, args.channels2, kernel_size=3, padding=1)
+    #     self.pool = nn.MaxPool2d(2, 2)
+    #     self.batch_norm1 = nn.BatchNorm2d(args.channels1)
+    #     self.batch_norm2 = nn.BatchNorm2d(args.channels2)
+        
+    # def forward(self, x):
+    #     x = F.relu(self.batch_norm1(self.conv1(x)))
+    #     x = self.pool(x)
+    #     x = F.relu(self.batch_norm2(self.conv2(x)))
+    #     x = self.pool(x)
+    #     return x
+    
     def __init__(self, args):
         super(CNNEncoder, self).__init__()
-        self.conv1 = nn.Conv2d(3, args.channels1, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(16, args.channels2, kernel_size=3, padding=1)
+        # 增加卷积层深度和通道数
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, padding=1)  # 增加通道数到64
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)  # 增加到128
+        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, padding=1)  # 新增一层
+        
+        self.batch_norm1 = nn.BatchNorm2d(64)
+        self.batch_norm2 = nn.BatchNorm2d(128)
+        self.batch_norm3 = nn.BatchNorm2d(256)
+        
         self.pool = nn.MaxPool2d(2, 2)
-        self.batch_norm1 = nn.BatchNorm2d(args.channels1)
-        self.batch_norm2 = nn.BatchNorm2d(args.channels2)
         
     def forward(self, x):
         x = F.relu(self.batch_norm1(self.conv1(x)))
         x = self.pool(x)
         x = F.relu(self.batch_norm2(self.conv2(x)))
+        x = self.pool(x)
+        x = F.relu(self.batch_norm3(self.conv3(x)))
         x = self.pool(x)
         return x
 
@@ -131,6 +153,23 @@ class CNNVAE(nn.Module):
             nn.Linear(64, 2)
         )
         
+        
+        self.classifier_only_video = nn.Sequential(
+            nn.Linear(4096, 512),  # 增大全连接层维度
+            nn.ReLU(),
+            nn.BatchNorm1d(512),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, 128),
+            nn.ReLU(),
+            nn.BatchNorm1d(128),
+            nn.Dropout(dropout_rate),
+            nn.Linear(128, 32),
+            nn.ReLU(),
+            nn.BatchNorm1d(32),
+            nn.Dropout(dropout_rate),
+            nn.Linear(32, 2)
+        )
+        
         self.apply(self._init_weights)
     
     def _init_weights(self, m):
@@ -160,7 +199,7 @@ class CNNVAE(nn.Module):
         cnn_features = self.cnn(x)
         cnn_features = cnn_features.view(x.size(0), -1)
         output = self.classifier_only_video(cnn_features)
-        return output, None, None, None, None
+        return output
     
     # mark cnn vae forward edition
     # def forward(self, original, optical):
@@ -227,3 +266,9 @@ def train_step(model, x, labels, optimizer, beta=1.0):
         'l1_loss': l1_loss.item(),
         'l2_loss': l2_loss.item()
     }
+    
+    
+    def get_cnn_model():
+        return CNNVAE(
+            input_size=(32,32)
+        )
