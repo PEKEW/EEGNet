@@ -185,20 +185,18 @@ class DGCNNTrainer(Trainer):
         self.dropout = dropout
         self.batch_size = batch_size
         self.lr = lr
+        self.l1_reg = l1_reg
         self.l2_reg = l2_reg
         self.num_epochs = num_epochs
         num_nodes = 0
         if edge_weight is not None:
             num_nodes = edge_weight.shape[0]
+        self.num_nodes = num_nodes
         super(DGCNNTrainer, self).__init__(
-            num_nodes=num_nodes, 
-            num_hiddens=num_hiddens,
             num_classes=num_classes,
             batch_size=batch_size,
             num_epoch=num_epochs,
             lr=lr,
-            l1_reg=l1_reg,
-            l2_reg=l2_reg,
             dropout=dropout,
             device=device)
 
@@ -308,7 +306,7 @@ def get_trainer(args) -> DGCNNTrainer:
     else:
         device_using = torch.device('cuda')
     
-    if 'eeg' in args.mod:
+    if 'eeg_group' == args.model_mod:
         _, edge_index, edge_weight = mUtils.get_edge_weight()
         return DGCNNTrainer(
                 edge_index = edge_index,
@@ -324,7 +322,7 @@ def get_trainer(args) -> DGCNNTrainer:
                 l2_reg = args.l2_reg,
                 num_epochs = args.num_epochs
             )
-    elif 'optical' in args.mod or 'original' in args.mod:
+    elif 'cnn' == args.mod:
         return CNNTrainer(
             num_classes = args.num_classes,
             device = device_using,

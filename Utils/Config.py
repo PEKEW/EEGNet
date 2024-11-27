@@ -15,6 +15,7 @@ class Args:
         self.valid_method = 'kfold' # 是否使用k折验证
         self.search = False # 是否搜索网络参数
         self.cpu = not torch.cuda.is_available()
+        self.model_save_path = '/home/pekew/code/EEGNet/results/models'
         
         self.num_classes = 2
         self.num_workers = 8
@@ -32,8 +33,9 @@ class Args:
         self.num_layers = 3
         self.clip_norm = 3
         
-        self.mod = ['original'] # 数据集加载的模态: 可选项: eeg | optical | original | motion
-        self.model_mod = 'cnn' # cnn | eeg_group
+        # 下面这两个参数一般需要一起修改
+        self.mod = ['eeg'] # 数据集加载的模态: 可选项: eeg | optical | original | motion
+        self.model_mod = 'eeg_group' # cnn | eeg_group
         self.n_folds = None
         self.n_per = None
         self.sec = None
@@ -69,13 +71,13 @@ class Args:
 
 def init():
     config = Args()
-    # torch.manual_seed(config.rand_seed)
-    # torch.cuda.manual_seed(config.rand_seed)
-    # torch.cuda.manual_seed_all(config.rand_seed)
-    # np.random.seed(config.rand_seed)
-    # random.seed(config.rand_seed)
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
-    # torch.cuda.synchronize()
-    # torch.backends.cudnn.enabled = False
+    torch.manual_seed(config.rand_seed)
+    torch.cuda.manual_seed(config.rand_seed)
+    torch.cuda.manual_seed_all(config.rand_seed)
+    np.random.seed(config.rand_seed)
+    random.seed(config.rand_seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.cuda.synchronize()
+    torch.backends.cudnn.enabled = False
     return config

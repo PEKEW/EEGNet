@@ -268,7 +268,7 @@ def train_step(model, x, labels, optimizer, beta=1.0):
     }
     
     
-    def get_cnn_model():
-        return CNNVAE(
-            input_size=(32,32)
-        )
+def get_cnn_model():
+    return CNNVAE(
+        input_size=(32,32)
+    )

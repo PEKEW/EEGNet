@@ -9,7 +9,7 @@ from Utils.Config import Args
 
 class RandomSampler(Sampler):
     init_list = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
-    def __init__(self, dataset, strategy = 'down', group1 = [], group2 = [], mod = 'train', group_id = 0):
+    def __init__(self, dataset, strategy = 'up', group1 = [], group2 = [], mod = 'train', group_id = 0):
         rng = random.Random(Args.rand_seed)
         self.dataset = dataset
         self.indices = []
@@ -67,7 +67,7 @@ class RandomSampler(Sampler):
         train_indices, test_indices = train_test_split(
             self.indices,
             random_state=Args.rand_seed,
-            test_size=0.3, # todo 这里可以小一点
+            test_size=0.15,
             shuffle=True,
             stratify=balanced_labels
         )

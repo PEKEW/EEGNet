@@ -112,7 +112,7 @@ class DGCNN(nn.Module):
         edge_weight = edge_weight.reshape(self.num_nodes, self.num_nodes)[self.xs, self.ys]
         self.edge_weight = nn.Parameter(torch.Tensor(edge_weight).float(), requires_grad=learnable_edge_weight)
 
-
+        # todo trans 2 config
         # self.node_learnable = node_learnable
         self.node_learnable = True
         if self.node_learnable:

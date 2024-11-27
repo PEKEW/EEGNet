@@ -17,7 +17,6 @@ import mne
 import torch
 from PIL import Image
 import torchvision.transforms as transforms
-from Datasets.DatasetsUtils import SequenceCollator
 
 
 class VRSicknessDataset(Dataset):
@@ -186,6 +185,8 @@ class VRSicknessDataset(Dataset):
                 optical_frames, original_frames = self._load_frames(sub_id, slice_id)
             elif 'optical' in self.mod:
                 optical_frames, original_frames = self._load_frames(sub_id, slice_id)
+            else:
+                optical_frames, original_frames = None, None
             if 'log' in self.mod:
                 motion_data = self._load_motion(sub_id, slice_id)
             else:
@@ -206,58 +207,3 @@ class VRSicknessDataset(Dataset):
         except Exception as e:
             print(f"Error loading sample (sub_{sub_id}, slice_{slice_id}): {str(e)}")
             return None
-        
-    @staticmethod
-    def _compute_statistics(original_frames, optical_frames, eeg, motion):
-        """优化的统计计算"""
-        with torch.no_grad():
-            return {
-                'original_frames_stats': {
-                    'mean': original_frames.mean().item(),
-                    'std': original_frames.std().item(),
-                    'min': original_frames.min().item(),
-                    'max': original_frames.max().item()
-                },
-                'optical_frames_stats': {
-                    'mean': optical_frames.mean().item(),
-                    'std': optical_frames.std().item(),
-                    'min': optical_frames.min().item(),
-                    'max': optical_frames.max().item()
-                },
-                'eeg_stats': {
-                    'mean': eeg.mean().item(),
-                    'std': eeg.std().item(),
-                    'min': eeg.min().item(),
-                    'max': eeg.max().item()
-                },
-                'motion_stats': {
-                    'mean': motion.mean().item(),
-                    'std': motion.std().item(),
-                    'min': motion.min().item(),
-                    'max': motion.max().item()
-                }
-            }
-
-# todo trans this file 2 loader
-def get_dataloader(root_dir, batch_size=32, num_workers=4, sequence_length=None, padding_mode='zero'):
-    """创建数据加载器
-    
-    Args:
-        sequence_length: 目标序列长度，None表示使用批次中最长序列的长度
-        padding_mode: 填充模式，'zero' 或 'repeat'
-    """
-    dataset = VRSicknessDataset(root_dir=root_dir)
-    collator = SequenceCollator(sequence_length, padding_mode)
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        collate_fn=collator,
-        pin_memory=torch.cuda.is_available(),
-        persistent_workers=True if num_workers > 0 else False,
-        prefetch_factor=2 if num_workers > 0 else None
-    )
-    
-    return dataloader

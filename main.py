@@ -1,10 +1,11 @@
 import torch
 import Utils
 import Utils.Config
-from Datasets.DataloaderUtils import get_data_loader_cnn, get_data_loaders_eeg
+from Datasets.DataloaderUtils import get_data_loader_cnn, get_data_loaders_eeg_group
 import models.trainer as Trainer
 from models.DGCNN import get_eeg_model
 from models.CNNVAE import get_cnn_model
+from models.Utils import *
     
 
 
@@ -35,7 +36,6 @@ def train(args):
         tester = Trainer.get_trainer(args)
         tester._set_data_loader(test_loader)
         tester._set_model(trainer.get_model())
-        # model = torch.load('test.pkl')
         model = model.to(device)
         model.eval()
         tester._set_model(model)
@@ -44,13 +44,11 @@ def train(args):
         
         
     elif args.model_mod == 'eeg_group':
-        train_loaders = get_data_loaders_eeg(args)
+        train_loaders = get_data_loaders_eeg_group(args)
         group1, group2 = train_loaders[:2], train_loaders[2:]
 
         trainers = [setup_trainer(loader, args) for loader in [group1[0], group2[0]]]
-        # trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
         
-        # 训练循环
         for epoch in range(args.num_epochs):
             print(f"Epoch {epoch}")
             metrics = [trainer._train_with_eeg(args, epoch) for trainer in trainers]
@@ -60,10 +58,10 @@ def train(args):
 
         test_metrics = []
         for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1], group2[1]]), 1):
-        # for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1]]), 1):
             tester = Trainer.get_trainer(args)
             tester._set_data_loader(test_loader)
             tester._set_model(trainer.get_model())
+            torch.save(trainer.get_model().state_dict(), f"{args.model_save_path}/model_group_{i}.pth")
             metric = tester._test_with_eeg(args)
             test_metrics.append(metric)
             print(f"Group{i} Test: {metric}")
@@ -73,8 +71,41 @@ def train(args):
 
 
 
+def plot_ring_graph(G, threshold):
+    G = (G - np.min(G))/ (np.max(G) - np.min(G))
+    plt = visualize_brain_regions(G, threshold)
+    plt.show() 
+
+def depersonalization(args):
+    G1_state_dict = torch.load(f"{args.model_save_path}/model_group_1.pth", weights_only=True)
+    G2_state_dict = torch.load(f"{args.model_save_path}/model_group_2.pth", weights_only=True)
+    G1_half = G1_state_dict['edge_weight'].detach().cpu().numpy()
+    G2_half = G2_state_dict['edge_weight'].detach().cpu().numpy()
+    G1_node = G1_state_dict['node_embedding'].detach().cpu().numpy()
+    G2_node = G2_state_dict['node_embedding'].detach().cpu().numpy()
+    
+    G1 = trans_triangular_to_full_matrix(G1_half)
+    G2 = trans_triangular_to_full_matrix(G2_half)
+    
+    common = CommonExtraction(G1, G2)
+    common._get_common_base()
+    common._get_common_activation()
+    common._identify_common_pattern()
+    g_common = common._get_common_matrix()
+    
+    
+    """
+    random seed = 42
+    """
+    plot_ring_graph(G1, 0.0068)
+    plot_ring_graph(G2, 0.009)
+    plot_ring_graph(g_common, 0.0052)
+
+
 def main(args):
-    train(args)
+    # train(args)
+    depersonalization(args)
+    
 
 
     # trained_model1 = group1_trainer.get_model()
