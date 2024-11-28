@@ -50,6 +50,7 @@ class Args:
         # VAE 参数
         self.hidden_size = 256
         self.vae_dropout = 0.5
+        self.bae_latent_dim = 90
         
         # CNNVAE 参数
         # todo edge是对称矩阵 减少参数

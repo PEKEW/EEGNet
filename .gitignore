@@ -8,8 +8,6 @@ DataProcess/.json
 DataProcess/*.mp3
 *.json
 data
-Utils/__pycache__
-Datasets/__pycache__
 results
-models/__pycache__
-models/__pycache__/*
+*.pyc
+*/__pycache__/*

@@ -50,7 +50,6 @@ class DeidentificationInput:
 
 class CommonExtraction:
     """
-    # mark 重构
     min ||G1 - W * H1||^2 + ||G2 - W * H2||^2
     s.t. W >= 0, H1 >= 0, H2 >= 0
     numerator = G1@H1.T + G2@H2.T
@@ -140,7 +139,6 @@ class CommonExtraction:
             act2 = self.H2[i,:]
             
             js_div = CommonExtraction.js_divergence(act1, act2)
-            print(js_div)
             self.patten_analysis.append(
                 {
                     'pattern_idx': i,
