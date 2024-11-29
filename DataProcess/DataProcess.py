@@ -13,16 +13,18 @@ import math
 
 FPS = 30
 
+
 @dataclass
-class Frame: 
+class Frame:
     """一个frame表示一帧数据，一个log中的一行数据，30个frame组成一个slice
     """
-    is_sickness: str #  0 or 1 表示当前帧是否为报告的sickness帧
+    is_sickness: str  # 0 or 1 表示当前帧是否为报告的sickness帧
     time_: float
     pos: str
     speed: str
     acceleration: str
     rotation_speed: str
+
 
 class LogProcessor:
     def __init__(self, data_clip_info: Dict[str, Dict[str, int]]) -> None:
@@ -63,7 +65,7 @@ class LogProcessor:
                     if line.split(',')[0].isdigit()), None)
 
     def _process_log_lines(self, lines: List[str], start_time: float, clip_info: Dict[str, int]) \
-    -> Dict[str, Dict[str, Dict[str, str]]]:
+            -> Dict[str, Dict[str, Dict[str, str]]]:
         sets = defaultdict(dict)
         slice_idx = 0
         frame_idx = 0
@@ -71,7 +73,7 @@ class LogProcessor:
         complete_sickness = False
         is_slice_changed = False
         # 使用绝对时间计算
-        expected_slice_count = math.ceil(clip_info['end'] - clip_info['begin']) 
+        expected_slice_count = math.ceil(clip_info['end'] - clip_info['begin'])
         tmp = start_time
         slice_range = []
         for _ in range(expected_slice_count):
@@ -136,77 +138,78 @@ class LogProcessor:
         except IOError as e:
             print('write norm_logs.json failed:', e)
 
+
 def log_process(data_clip_info: Dict[str, Dict[str, int]]) -> None:
     processor = LogProcessor(data_clip_info)
     processor.process()
 
 
 data_clip_info = {
-        'TYR': { # 263 - 10 = 253
-            'begin': 10,
-            'end': 263
-        },
-        'XSJ': { # 196 - 26 = 170
-            'begin': 26,
-            'end': 196
-        },
-        'CM': { # ica
-            'begin': 78, # 367-78 = 289
-            'end': 367
-        },
-        'TX': { # 227 - 2 = 225
-            'begin': 2,
-            'end': 227
-        },
-        'HZ':{ # ICA # 237 - 4 = 233
-            'begin': 4,
-            'end': 237
-        },
-        'CYL':{ # ICA  # 292 - 4 = 288
-            'begin': 4,
-            'end': 292
-        },
-        'GKW': {  # ICA # 168 - 22 = 146
-            'begin': 22,
-            'end': 168
-        },
-        'LMH':{ # 310 - 7 = 303
-            'begin': 7,
-            'end': 310
-        },
-        'WJX': { # 233 - 3 = 230
-            'begin': 3,
-            'end': 233
-        },
+    'TYR': {  # 263 - 10 = 253
+        'begin': 10,
+        'end': 263
+    },
+    'XSJ': {  # 196 - 26 = 170
+        'begin': 26,
+        'end': 196
+    },
+    'CM': {  # ica
+        'begin': 78,  # 367-78 = 289
+        'end': 367
+    },
+    'TX': {  # 227 - 2 = 225
+        'begin': 2,
+        'end': 227
+    },
+    'HZ': {  # ICA # 237 - 4 = 233
+        'begin': 4,
+        'end': 237
+    },
+    'CYL': {  # ICA  # 292 - 4 = 288
+        'begin': 4,
+        'end': 292
+    },
+    'GKW': {  # ICA # 168 - 22 = 146
+        'begin': 22,
+        'end': 168
+    },
+    'LMH': {  # 310 - 7 = 303
+        'begin': 7,
+        'end': 310
+    },
+    'WJX': {  # 233 - 3 = 230
+        'begin': 3,
+        'end': 233
+    },
 
-        'CWG':{# ICA  # 209 - 3 = 206
-            'begin': 3,
-            'end': 209
-        },
-        'SHQ':{ # 122 - 2 = 120
-            'begin': 2,
-            'end': 122
-        },
-        'YHY':{ # 268 - 2 = 266
-            'begin': 2,
-            'end': 268
-        },
-        'LZX':{ # 244 - 11 = 233
-            'begin': 11,
-            'end': 244
-        },
-        'LJ':{ # 252 - 3 = 249
-            'begin': 3,
-            'end': 252
-        },
-        'WZT':{ # 254 - 5 = 249
-            'begin': 5,
-            'end': 254
-        }
+    'CWG': {  # ICA  # 209 - 3 = 206
+        'begin': 3,
+        'end': 209
+    },
+    'SHQ': {  # 122 - 2 = 120
+        'begin': 2,
+        'end': 122
+    },
+    'YHY': {  # 268 - 2 = 266
+        'begin': 2,
+        'end': 268
+    },
+    'LZX': {  # 244 - 11 = 233
+        'begin': 11,
+        'end': 244
+    },
+    'LJ': {  # 252 - 3 = 249
+        'begin': 3,
+        'end': 252
+    },
+    'WZT': {  # 254 - 5 = 249
+        'begin': 5,
+        'end': 254
+    }
 }
 
 
-def down_sample(videoPath:str, outPath:str, fps:int=30) -> None:
+def down_sample(videoPath: str, outPath: str, fps: int = 30) -> None:
     """down sample video
 
     Args:
@@ -217,7 +220,7 @@ def down_sample(videoPath:str, outPath:str, fps:int=30) -> None:
     newClip.write_videofile(outPath, fps=fps)
 
 
-def clip_video(videoPath:str, outPath: str, startTime:int, endTime:int) -> None:
+def clip_video(videoPath: str, outPath: str, startTime: int, endTime: int) -> None:
     """clip video
     Args:
         videoPath (str): video path
@@ -230,7 +233,7 @@ def clip_video(videoPath:str, outPath: str, startTime:int, endTime:int) -> None:
     newClip.write_videofile(outPath)
 
 
-def cal_optical_flow(videoRootPath:str, videoID :str) -> None:
+def cal_optical_flow(videoRootPath: str, videoID: str) -> None:
     """cal optical flow
     **** video must cliped before this func!**** 
     Args:
@@ -241,7 +244,8 @@ def cal_optical_flow(videoRootPath:str, videoID :str) -> None:
     _, frame1 = vd.read()
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    file_name = os.path.join(current_dir, 'OpticalFlows', f'{videoID}frame_0_original.png')
+    file_name = os.path.join(current_dir, 'OpticalFlows', f'{
+                             videoID}frame_0_original.png')
     cv.imwrite(file_name, frame1)
     prvs = cv.cvtColor(frame1, cv.COLOR_BGR2GRAY)
     hsv = np.zeros_like(frame1)
@@ -253,15 +257,18 @@ def cal_optical_flow(videoRootPath:str, videoID :str) -> None:
         if not ret:
             print('Video End, total frames:', idx+1)
             break
-        file_name = os.path.join(current_dir, 'OpticalFlows', f'{videoID}frame_{idx}_original.png')
+        file_name = os.path.join(current_dir, 'OpticalFlows', f'{
+                                 videoID}frame_{idx}_original.png')
         cv.imwrite(file_name, frame2)
         next = cv.cvtColor(frame2, cv.COLOR_BGR2GRAY)
-        flow = cv.calcOpticalFlowFarneback(prvs, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        flow = cv.calcOpticalFlowFarneback(
+            prvs, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
         mag, ang = cv.cartToPolar(flow[..., 0], flow[..., 1])
         hsv[..., 0] = ang * 180 / np.pi / 2
         hsv[..., 2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)
         bgr = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
-        file_name = os.path.join(current_dir, 'OpticalFlows', f'{videoID}frame_{idx}_optical.png')
+        file_name = os.path.join(current_dir, 'OpticalFlows', f'{
+                                 videoID}frame_{idx}_optical.png')
         cv.imwrite(file_name, bgr)
         prvs = next
         idx += 1
@@ -271,7 +278,7 @@ def cal_optical_flow(videoRootPath:str, videoID :str) -> None:
 def video_process_multi(data_clip_info: Dict[str, Dict[str, int]]) -> None:
     with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 8)) as executor:
         futures = [executor.submit(process_subject, sub_name, clip_info)
-                for sub_name, clip_info in data_clip_info.items()]
+                   for sub_name, clip_info in data_clip_info.items()]
 
         total = len(futures)
         completed = 0
@@ -284,19 +291,23 @@ def video_process_multi(data_clip_info: Dict[str, Dict[str, int]]) -> None:
                 print(f'Error: {e}')
                 import traceback
                 traceback.print_exc()
+
+
 def process_subject(sub_name: str, clip_info: Dict[str, int]) -> None:
     try:
         print(f'Processing {sub_name} (1st Clip (norm))')
         current_dir = os.path.dirname(os.path.abspath(__file__))
         input_video = os.path.join(current_dir, 'Videos', f'{sub_name}.mp4')
-        downsmapled_video = os.path.join(current_dir, 'Videos', f'down_{sub_name}.mp4')
-        normalized_video = os.path.join(current_dir, 'Videos', f'norm_{sub_name}.mp4')
+        downsmapled_video = os.path.join(
+            current_dir, 'Videos', f'down_{sub_name}.mp4')
+        normalized_video = os.path.join(
+            current_dir, 'Videos', f'norm_{sub_name}.mp4')
         os.makedirs('Videos', exist_ok=True)
         down_sample(input_video, downsmapled_video)
-        clip_video(str(downsmapled_video), str(normalized_video), clip_info['begin'], clip_info['end'])
+        clip_video(str(downsmapled_video), str(normalized_video),
+                   clip_info['begin'], clip_info['end'])
         clip_duration = clip_info['end'] - clip_info['begin']
         process_video_slices(sub_name, normalized_video, clip_duration)
-
 
         process_optical_flow(sub_name, clip_duration)
     except Exception as e:
@@ -306,6 +317,7 @@ def process_subject(sub_name: str, clip_info: Dict[str, int]) -> None:
         import gc
         gc.collect()
 
+
 def process_video_slices(sub_name: str, video_path: Path, clip_duration: int) -> None:
     current_dir = os.path.dirname(os.path.abspath(__file__))
     clip_dir = os.path.join(current_dir, 'ClipVideo')
@@ -313,30 +325,37 @@ def process_video_slices(sub_name: str, video_path: Path, clip_duration: int) ->
     for second in range(clip_duration):
         print(f'slicing video: {second+1} / {clip_duration}')
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        output_clip = os.path.join(current_dir, 'ClipVideo', f'norm_{sub_name}_{second}.mp4')
+        output_clip = os.path.join(current_dir, 'ClipVideo', f'norm_{
+                                   sub_name}_{second}.mp4')
         clip_video(str(video_path), str(output_clip), second, second+1)
+
 
 def process_optical_flow(sub_name: str, clip_duration: int) -> None:
     optical_dir = os.path.join(current_dir, 'OpticalFlows')
     os.makedirs(optical_dir, exist_ok=True)
     for clip_id in range(clip_duration):
-        in_ = os.path.join(current_dir, 'ClipVideo', f'norm_{sub_name}_{clip_id}.mp4')
+        in_ = os.path.join(current_dir, 'ClipVideo',
+                           f'norm_{sub_name}_{clip_id}.mp4')
         cal_optical_flow(in_, f'sub_{sub_name}_sclice_{clip_id}_')
+
 
 def label_process() -> Dict[str, Dict[str, int]]:
     def process_slice(slice: Dict[str, Dict[str, str]]) -> int:
-        any_complete_sickness = any(frame['complete_sickness'] for frame in slice.values())
-        sickness_frames = sum(1 for frame in slice.values() if frame['is_sickness'] == '1')
+        any_complete_sickness = any(
+            frame['complete_sickness'] for frame in slice.values())
+        sickness_frames = sum(1 for frame in slice.values()
+                              if frame['is_sickness'] == '1')
         total_frames = len(slice)
-        if total_frames == 0: return 0
-        
+        if total_frames == 0:
+            return 0
+
         is_positive = (
-                        sickness_frames / len(slice) >= 0.1 or
-                        any_complete_sickness
-                    )
-                    
+            sickness_frames / len(slice) >= 0.1 or
+            any_complete_sickness
+        )
+
         # print(f"- Is positive: {is_positive}")
-        
+
         return 1 if is_positive else 0
 
     result = defaultdict(dict)
@@ -371,10 +390,9 @@ def label_process() -> Dict[str, Dict[str, int]]:
     except IOError as e:
         print(f"Error writing to labels.json: {e}")
 
-    print(f'Positive label count: {pos_label_cnt}, Negative label count: {neg_label_cnt}. {cnt}')
+    print(f'Positive label count: {
+          pos_label_cnt}, Negative label count: {neg_label_cnt}. {cnt}')
     return result
-
-
 
 
 if __name__ == '__main__':

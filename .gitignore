@@ -1,3 +1,5 @@
+*.pyc
+*/__pycache__/*
 DataProcess/Videos
 DataProcess/ClipVideo
 DataProcess/OpticalFlows
@@ -9,5 +11,3 @@ DataProcess/*.mp3
 *.json
 data
 results
-*.pyc
-*/__pycache__/*
