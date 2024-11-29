@@ -7,22 +7,9 @@ import warnings
 from models.Utils import normalize_matrix
 
 
-class DeprecatedConvDescriptor:
-    def __init__(self, _layer):
-        self.conv_layer = _layer
-
-    def __get__(self, instance, owner):
-        warnings.warn(
-            "The member is deprecated and will be removed in future versions. ",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return self.conv_layer
-
-
-
 def maybe_num_nodes(edge_idx, num_nodes=None):
     return edge_idx.max().item() + 1 if num_nodes is None else num_nodes
+
 
 def add_remaining_self_loops(edge_idx, edge_weight=None, fillValue=1, num_nodes=None):
     """添加自环 并返回更新的边索引和边权重
@@ -42,27 +29,35 @@ def add_remaining_self_loops(edge_idx, edge_weight=None, fillValue=1, num_nodes=
     mask = row != col
     inv_mask = ~mask
 
-    loop_weight = torch.full((num_nodes,), fillValue, dtype = None if edge_weight is None else edge_weight.dtype, device=edge_idx.device)
+    loop_weight = torch.full(
+        (num_nodes,), fillValue, dtype=None if edge_weight is None else edge_weight.dtype, device=edge_idx.device)
     if (edge_weight is not None):
         assert edge_weight.numel() == edge_idx.size(1)
         remaining_edge_weight = edge_weight[inv_mask]
 
         if remaining_edge_weight.numel() > 0:
             loop_weight[row[inv_mask]] = remaining_edge_weight
-        
+
         edge_weight = torch.cat([edge_weight[mask], loop_weight], dim=0)
-    
+
     loop_idx = torch.arange(0, num_nodes, dtype=row.dtype, device=row.device)
     loop_idx = loop_idx.unsqueeze(0).repeat(2, 1)
     edge_idx = torch.cat([edge_idx[:, mask], loop_idx], dim=1)
 
     return edge_idx, edge_weight
 
+
 class _SGConv(SGConv):
+<<<<<<< HEAD
     def __init__(self, num_features, num_classes, K=2, cached=False, bias=True):
         super(_SGConv, self).__init__(num_features, num_classes, K, cached, bias)
+=======
+    def __init__(self, num_features, num_classes, K=1, cached=False, bias=True):
+        super(_SGConv, self).__init__(
+            num_features, num_classes, K, cached, bias)
+>>>>>>> vim_branch
         nn.init.xavier_normal_(self.lin.weight)
-    
+
     @staticmethod
     def norm(edge_idx, num_nodes, edge_weight, improved=False, dtype=None):
         """对图的边权重进行归一化处理
@@ -78,33 +73,38 @@ class _SGConv(SGConv):
             tensor tensor: 归一化的邻接矩阵
         """
         if edge_weight is None:
-            edge_weight = torch.ones((edge_idx.size(1), ), dtype=dtype, device=edge_idx.device)
+            edge_weight = torch.ones(
+                (edge_idx.size(1), ), dtype=dtype, device=edge_idx.device)
         fill_value = 1 if not improved else 2
-        edge_idx, edge_weight = add_remaining_self_loops(edge_idx, edge_weight, fill_value, num_nodes)
+        edge_idx, edge_weight = add_remaining_self_loops(
+            edge_idx, edge_weight, fill_value, num_nodes)
         row, col = edge_idx
-        deg = scatter_add(torch.abs(edge_weight), row, dim=0, dim_size=num_nodes)
-        deg_inv_squrt = deg.pow(-0.5) # 度矩阵归一化
-        deg_inv_squrt[deg_inv_squrt == float('inf')] = 0 # 规范除0
+        deg = scatter_add(torch.abs(edge_weight), row,
+                          dim=0, dim_size=num_nodes)
+        deg_inv_squrt = deg.pow(-0.5)  # 度矩阵归一化
+        deg_inv_squrt[deg_inv_squrt == float('inf')] = 0  # 规范除0
         # 归一化邻接矩阵
         return edge_idx, deg_inv_squrt[row] * edge_weight * deg_inv_squrt[col]
-    
+
     def forward(self, x, edge_idx, edge_weight=None):
 
         # 缓存加速
         if not self.cached or self.cached_result is None:
-            edge_idx, edge_weight = self.norm(edge_idx, x.size(0), edge_weight, dtype=x.dtype)
+            edge_idx, edge_weight = self.norm(
+                edge_idx, x.size(0), edge_weight, dtype=x.dtype)
 
             for k in range(self.K):
                 x = self.propagate(edge_idx, x=x, edge_weight=edge_weight)
             self.cached_result = x
-        
+
         return self.lin(self.cached_result)
-    
+
     def message(self, x_j, edge_weight):
         return edge_weight.view(-1, 1) * x_j
-    
+
 
 class DGCNN(nn.Module):
+<<<<<<< HEAD
     def __init__(self,
                 device,
                 num_nodes,
@@ -117,6 +117,20 @@ class DGCNN(nn.Module):
                 dropout=0.5,
                 hidden_channels=64,
                 node_learnable = True):
+=======
+    # Todo important remove some params
+    def __init__(self,
+                 edge_weight,
+                 edge_idx,
+                 num_features=250,
+                 num_nodes=30,
+                 num_hiddens=64,
+                 num_classes=2,
+                 num_layers=2,
+                 learnable_edge_weight=True,
+                 dropout=0.5,
+                 node_learnable=False):
+>>>>>>> vim_branch
         """DGCNN model
         Args:
             device (torch.device): model device.
@@ -131,10 +145,11 @@ class DGCNN(nn.Module):
             dropout (float, optional): dropout. Defaults to 0.5.
         """
         super(DGCNN, self).__init__()
-        self.device = device
         self.num_nodes = num_nodes
-        self.xs, self.ys = torch.tril_indices(self.num_nodes, self.num_nodes, offset=0)
+        self.xs, self.ys = torch.tril_indices(
+            self.num_nodes, self.num_nodes, offset=0)
         self.edge_idx = edge_idx
+<<<<<<< HEAD
         edge_weight = edge_weight.reshape(self.num_nodes, self.num_nodes)[self.xs, self.ys]
         self.edge_weight = nn.Parameter(torch.Tensor(edge_weight).float(), requires_grad=True)
 
@@ -143,12 +158,38 @@ class DGCNN(nn.Module):
             nn.init.xavier_normal_(self.node_embedding)
         else:
             self.node_embedding = None
+=======
+        edge_weight = edge_weight.reshape(self.num_nodes, self.num_nodes)[
+            self.xs, self.ys]
+        self.edge_weight = nn.Parameter(torch.Tensor(
+            edge_weight).float(), requires_grad=learnable_edge_weight)
+>>>>>>> vim_branch
 
+        # todo trans 2 config
+        self.node_learnable = node_learnable
+        # self.node_learnable = True
+        if self.node_learnable:
+            self.node_embedding = nn.Parameter(torch.randn(
+                num_nodes, num_features).float(), requires_grad=True)
+            nn.init.xavier_normal_(self.node_embedding)
+        else:
+            self.node_embedding = None
 
         self.dropout = dropout
+        self.dropout_layer = nn.Dropout(p=self.dropout)
         self.bn1 = nn.BatchNorm1d(num_features)
-        self.conv1 = _SGConv(num_features=num_features, num_classes=num_hiddens, K=num_layers)
+        self.conv1 = _SGConv(num_features=num_features,
+                             num_classes=num_hiddens, K=num_layers)
+        fc_input_dim = num_hiddens * num_nodes
+        self.hidden_sizes = [
+            fc_input_dim,
+            fc_input_dim // 2,
+            # fc_input_dim // 4,
+            fc_input_dim // 8,
+            num_classes  # 输出维度
+        ]
 
+<<<<<<< HEAD
         self.fc1 = nn.Linear(num_hiddens * num_nodes, hidden_channels)
         self.fc2 = nn.Linear(hidden_channels, num_classes)
 
@@ -157,6 +198,19 @@ class DGCNN(nn.Module):
         self.fc = DeprecatedConvDescriptor(nn.Linear(num_hiddens, num_classes))
     
     def append(self, edge_idx: torch.Tensor, batch_size: int):
+=======
+        self.fc_layers = nn.ModuleList()
+        for i in range(len(self.hidden_sizes) - 1):
+            self.fc_layers.append(
+                nn.Linear(self.hidden_sizes[i], self.hidden_sizes[i + 1]))
+
+        for fc in self.fc_layers:
+            nn.init.xavier_normal_(fc.weight)
+            if fc.bias is not None:
+                nn.init.zeros_(fc.bias)
+
+    def append(self, edge_idx, batch_size):
+>>>>>>> vim_branch
         """concate a batch of graphs.
 
         Args:
@@ -174,27 +228,49 @@ class DGCNN(nn.Module):
         # 用于存储batch索引
         data_batch = torch.LongTensor(self.num_nodes * batch_size)
         for i in range(batch_size):
-            edge_idx_all[:, i*edge_idx.shape[1]:(i+1)*edge_idx.shape[1]] = edge_idx + i * self.num_nodes
+            edge_idx_all[:, i*edge_idx.shape[1]
+                :(i+1)*edge_idx.shape[1]] = edge_idx + i * self.num_nodes
             data_batch[i*self.num_nodes:(i+1)*self.num_nodes] = i
         return edge_idx_all.to(self.device), data_batch.to(self.device)
 
     def forward(self, x):
         batch_size = len(x)
         if self.node_embedding is not None:
-            node_embedding = self.node_embedding.unsqueeze(0).repeat(batch_size, 1, 1)
+            node_embedding = self.node_embedding.unsqueeze(
+                0).repeat(batch_size, 1, 1)
             x = x + node_embedding
         edge_idx, _ = self.append(self.edge_idx, batch_size)
-        edge_weight = torch.zeros((self.num_nodes, self.num_nodes), device=edge_idx.device)
-        edge_weight[self.xs.to(edge_weight.device), self.ys.to(edge_weight.device)] = self.edge_weight
-        edge_weight = edge_weight + edge_weight.transpose(1, 0) - torch.diag(edge_weight.diagonal())
+        edge_weight = torch.zeros(
+            (self.num_nodes, self.num_nodes), device=edge_idx.device)
+        edge_weight[self.xs.to(edge_weight.device), self.ys.to(
+            edge_weight.device)] = self.edge_weight
+        edge_weight = edge_weight + \
+            edge_weight.transpose(1, 0) - torch.diag(edge_weight.diagonal())
         edge_weight = normalize_matrix(edge_weight)
         edge_weight = edge_weight.reshape(-1).repeat(batch_size)
         x = self.bn1(x.transpose(1, 2)).transpose(1, 2)
         x = x.reshape(-1, x.shape[-1])
         x = self.conv1(x, edge_idx, edge_weight)
         x = x.view((batch_size, -1))
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
+
+        x = self.dropout_layer(x)
+
+        for i, fc_layer in enumerate(self.fc_layers):
+            x = fc_layer(x)
+            if i < len(self.fc_layers) - 1:
+                x = F.relu(x)
 
         return x
+
+
+def get_eeg_model(args, edge_wight, edge_idx):
+    return DGCNN(
+        device=torch.device('cuda' if not args.cpu else 'cpu'),
+        num_nodes=args.num_nodes,
+        edge_weight=edge_wight,
+        edge_idx=edge_idx,
+        num_features=args.num_features,
+        num_classes=args.num_classes,
+        num_hiddens=args.num_hiddens,
+        num_layers=args.num_layers,
+    )

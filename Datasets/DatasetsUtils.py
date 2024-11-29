@@ -59,6 +59,10 @@ class SequenceCollator:
             for key in self.include:
                 processed_batch[key].append(sample[key])
 
+<<<<<<< HEAD
+=======
+        
+>>>>>>> vim_branch
         result = {
             'sub_id': processed_batch['sub_id'],
             'slice_id': processed_batch['slice_id'],
@@ -69,5 +73,9 @@ class SequenceCollator:
         for key in self.include:
             result[key] = torch.stack(processed_batch[key])
         
+<<<<<<< HEAD
+=======
+
+>>>>>>> vim_branch
         return result
 

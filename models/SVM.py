@@ -16,7 +16,7 @@ class SVMClassifier:
         self.model = None
         self.scaler = None
 
-    def loadData(self, data_path:str, label_path:str):
+    def load_data(self, data_path: str, label_path: str):
         with open(data_path, 'r') as f:
             norm_logs = json.load(f)
         with open(label_path, 'r') as f:
@@ -27,7 +27,7 @@ class SVMClassifier:
                 slice_features = []
                 for frame in frames.values():
                     pos = ast.literal_eval(frame['pos'])
-                    slice_features.append([               
+                    slice_features.append([
                         float(pos[0]), float(pos[1]), float(pos[2]),
                         float(frame['time_']),
                         float(frame['speed']),
@@ -58,7 +58,8 @@ class SVMClassifier:
         print(f"Balanced number of samples: {len(self.data)}")
 
     def train_fit(self, test_size=0.2, random_state=42):
-        X_train, X_test, y_train, y_test = train_test_split(self.data, self.labels, test_size=test_size, random_state=random_state)
+        X_train, X_test, y_train, y_test = train_test_split(
+            self.data, self.labels, test_size=test_size, random_state=random_state)
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
@@ -75,11 +76,10 @@ class SVMClassifier:
         print(f"Mean Squared Error: {mse}")
 
 
-
 if __name__ == '__main__':
     data_path = './DataProcess/norm_logs.json'
     labels_path = './DataProcess/labels.json'
     random_seed = random.randint(0, 100)
     svm = SVMClassifier()
-    svm.loadData(data_path, labels_path)
+    svm.load_data(data_path, labels_path)
     svm.train_fit(random_state=random_seed)
