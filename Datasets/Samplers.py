@@ -1,12 +1,14 @@
-from torch.utils.data import  Sampler
+from torch.utils.data import Sampler
 import random
 from sklearn.model_selection import train_test_split
 from Utils.Config import Args
 
 
 class RandomSampler(Sampler):
-    init_list = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
-    def __init__(self, dataset, strategy = 'down', group1 = None, group2 = None, mod = 'train', group_id = 0):
+    init_list = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW',
+                 'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
+
+    def __init__(self, dataset, strategy='down', group1=None, group2=None, mod='train', group_id=0):
         """随机对被试采样
 
         Args:
@@ -40,7 +42,8 @@ class RandomSampler(Sampler):
                     negative_indices.append(i)
         pos_size = len(positive_indices)
         neg_size = len(negative_indices)
-        target_size = max(pos_size, neg_size) if self.strategy == 'up' else min(pos_size, neg_size)
+        target_size = max(pos_size, neg_size) if self.strategy == 'up' else min(
+            pos_size, neg_size)
         if pos_size > target_size:
             positive_indices = random.sample(positive_indices, target_size)
         elif pos_size < target_size:
@@ -51,7 +54,8 @@ class RandomSampler(Sampler):
             negative_indices = random.choices(negative_indices, k=target_size)
         self.indices = positive_indices + negative_indices
         random.shuffle(self.indices)
-        balanced_labels = [dataset.labels[dataset.samples[i][0]][f"slice_{dataset.samples[i][1]}"] for i in self.indices]
+        balanced_labels = [dataset.labels[dataset.samples[i][0]]
+                           [f"slice_{dataset.samples[i][1]}"] for i in self.indices]
 
         train_indices, test_indices = train_test_split(
             self.indices,
@@ -60,35 +64,39 @@ class RandomSampler(Sampler):
             shuffle=True,
             stratify=balanced_labels
         )
-        
+
         self.train_indices = train_indices
         self.test_indices = test_indices
 
-
     def __iter__(self):
         return iter(self.train_indices if self.mod == 'train' else self.test_indices)
+
     def __len__(self):
         return len(self.train_indices) if self.mod == 'train' else len(self.test_indices)
-    
+
 
 # todo trans sampler class 2 new sampler file
 
 class GenderSubjectSampler(Sampler):
     male_sub_list = ['TYR', 'XSJ', 'CM', 'SHQ', 'LMH', 'LZX', 'LJ', 'WZT']
     female_sub_list = ['TX', 'HZ', 'GKW', 'LMH', 'WJX', 'CGW', 'YHY', 'LZY']
-    def __init__(self, dataset, strategy = 'down'):
+
+    def __init__(self, dataset, strategy='down'):
         """
             strategy (str, optional): down | up. Defaults to 'down'.
         """
         self.dataset = dataset
         self.indices = []
+
     def __iter__(self):
         return iter(self.indices)
+
     def __len__(self):
         return len(self.indices)
 
+
 class GenderSubjectSamplerMale(GenderSubjectSampler):
-    def __init__(self, dataset, strategy = 'down'):
+    def __init__(self, dataset, strategy='down'):
         super().__init__(dataset, strategy=strategy)
         positive_indices = [
             i for i, (sub_id, slice_id) in enumerate(dataset.samples)
@@ -100,7 +108,8 @@ class GenderSubjectSamplerMale(GenderSubjectSampler):
         ]
         pos_size = len(positive_indices)
         neg_size = len(negative_indices)
-        target_size = max(pos_size, neg_size) if strategy == 'up' else min(pos_size, neg_size)
+        target_size = max(pos_size, neg_size) if strategy == 'up' else min(
+            pos_size, neg_size)
         if pos_size > target_size:
             positive_indices = random.sample(positive_indices, target_size)
         elif pos_size < target_size:
@@ -113,8 +122,9 @@ class GenderSubjectSamplerMale(GenderSubjectSampler):
         self.indices = positive_indices + negative_indices
         random.shuffle(self.indices)
 
+
 class GenderSubjectSamplerFemale(GenderSubjectSampler):
-    def __init__(self, dataset, strategy = 'down'):
+    def __init__(self, dataset, strategy='down'):
         super().__init__(dataset, strategy=strategy)
         positive_indices = [
             i for i, (sub_id, slice_id) in enumerate(dataset.samples)
@@ -126,7 +136,8 @@ class GenderSubjectSamplerFemale(GenderSubjectSampler):
         ]
         pos_size = len(positive_indices)
         neg_size = len(negative_indices)
-        target_size = max(pos_size, neg_size) if strategy == 'up' else min(pos_size, neg_size)
+        target_size = max(pos_size, neg_size) if strategy == 'up' else min(
+            pos_size, neg_size)
         if pos_size > target_size:
             positive_indices = random.sample(positive_indices, target_size)
         elif pos_size < target_size:
@@ -139,8 +150,10 @@ class GenderSubjectSamplerFemale(GenderSubjectSampler):
         self.indices = positive_indices + negative_indices
         random.shuffle(self.indices)
 
+
 class InterSubjectSampler(Sampler):
     """跨被试采样器"""
+
     def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
         self.dataset = dataset
         self.fold = fold
@@ -148,23 +161,27 @@ class InterSubjectSampler(Sampler):
         self.n_subs = len(sub_list)
         self.n_per = n_per
         self.is_train = is_train
-        
+
         val_start = n_per * fold
         val_end = min(n_per * (fold + 1), self.n_subs)
         val_subs = set(self.sub_list[val_start:val_end])
-        
+
         self.indices = [
             i for i, (sub_id, _) in enumerate(dataset.samples)
             if (sub_id in val_subs) != is_train
         ]
-    
+
     def __iter__(self):
         return iter(self.indices)
+
     def __len__(self):
         return len(self.indices)
+
 
 class ExtraSubjectSampler(Sampler):
     def __init__(self, dataset, fold, sub_list, n_per, is_train=True):
         pass
+
     def __iter__(self):
-        raise NotImplementedError("ExtraSubjectSampler is not implemented yet.")
+        raise NotImplementedError(
+            "ExtraSubjectSampler is not implemented yet.")

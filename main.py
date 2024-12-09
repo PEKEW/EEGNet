@@ -1,183 +1,136 @@
-import torch
-import Utils
-import Utils.Config
-<<<<<<< HEAD
-from Datasets.DataloaderUtils import get_data_loaders_gender, get_data_loaders_random, get_data_loader_cnn
-import models.trainer as Trainer
-from models.DGCNN import DGCNN
-from models.CNNVAE import CNNVAE
-from models.Utils import *
-import numpy as np
-import matplotlib.pyplot as plt
+from models.CNNVAE import get_cnn_model
+from models.DGCNN import get_gnn_model
+from Datasets.DataloaderUtils import get_data_loader_cnn, \
+    get_data_loaders_eeg_no_group, get_data_loader_all, get_data_loaders_eeg_group
 from Datasets.Datasets import VRSicknessDataset
+import numpy as np
+from models.Utils import *
+from models.All import MCDIS
+import models.trainer as Trainer
+import torch
+import Utils.Config
+from models.Utils import get_edge_weight
+from typing import Tuple, Optional, Dict
 
 
-def get_gnn_model(args, edge_wight, edge_idx):
-    return DGCNN(
-        device=torch.device('cuda' if not args.cpu else 'cpu'),
-        num_nodes=args.num_nodes,
-        edge_weight=edge_wight,
+# TODO: improve trans this func to models.All
+def _get_edge_weight(args):
+    try:
+        w = torch.load(f"{args.model_save_path}/model_group_1.pth")
+        edge_weight = w.state_dict()['edge_weight']
+        edge_idx = w.state_dict()['edge_idx']
+    except Exception:
+        print("fail to load pretrained model")
+        _, edge_weight, edge_idx = get_edge_weight()
+    return edge_weight, edge_idx
+
+
+def get_dtf(args):
+    # TODO: important return diffusion module
+    from models.Dtf import DTF
+    dft = DTF(args)
+    try:
+        dft.load_state_dict(torch.load(args.dtf_path))
+    except Exception:
+        print("fail to load depersonal model")
+    return dft
+
+
+def get_mcdis_model(args):
+    edge_weight, edge_idx = _get_edge_weight(args)
+    return MCDIS(
+        args=args,
+        edge_weight=edge_weight,
         edge_idx=edge_idx,
-        num_features=args.num_features,
-        num_classes=args.num_classes,
-        num_hiddens=args.num_hiddens,
-        num_layers=args.num_layers,
-        dropout=args.eeg_dropout,
-        hidden_channels=args.edge_hidden_size,
-        node_learnable=args.node_learnable,
+        Dtf=get_dtf(args)
     )
 
 
-def get_cnn_model():
-    return CNNVAE(
-        input_size=(32,32)
-    )
-
-def train_cnn_vae(device: torch.device, args):
-    # print("=" * 50)
-    # print("训练CNN-VAE")
+def train_cnn_vae(device: torch.device, args: Utils.Config.Args):
     train_loader, test_loader = get_data_loader_cnn(args)
-    trainer = Trainer.get_cnn_trainer(args)
+    trainer:Trainer.CNNTrainer = Trainer.get_video_trainer(args)
     trainer._set_data_loader(train_loader)
     model = get_cnn_model().to(device)
     trainer._set_model(model)
     trainer.init_optimizer()
     for epoch in range(args.num_epochs_video):
         # print(f"Epoch {epoch}")
-        metric = trainer._train_with_original(args, epoch)
+        metric = trainer._train_with_video(args, epoch)
         # print(f"Train: {metric}")
-    
-    tester = Trainer.get_cnn_trainer(args)
+
+    tester = Trainer.get_video_trainer(args)
     tester._set_data_loader(test_loader)
     tester._set_model(get_cnn_model().to(device))
     metric = tester._test_with_video(args)
-    # print(f"Test: {metric}")
+    print(f"Test: {metric}")
+
+def setup_and_train_model(group1, group2, args, device):
+    def setup_trainer(loader, args):
+        trainer = Trainer.get_gnn_trainer(args)
+        trainer._set_data_loader(loader)
+        model = get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device)
+        trainer._set_model(model)
+        trainer.init_optimizer()
+        return trainer
+    
+    trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
+    
+    # Training
+    for epoch in range(args.num_epochs_gnn):
+        metrics = [trainer._train_with_eeg(args, epoch) for trainer in trainers]
+    
+    # Testing
+    test_metrics = []
+    for trainer, test_loader in zip(trainers, [group1[1], group2[1]]):
+        tester = Trainer.get_gnn_trainer(args)
+        tester._set_data_loader(test_loader)
+        tester._set_model(get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device))
+        metric = tester._test_with_eeg()
+        test_metrics.append(metric)
+    
+    return test_metrics
 
 
-def train_normalize_eeg_gnn(device: torch.device, args):
+def update_model_paras(args, params):
+    # TODO: important is needs search params, fix this
+    raise NotImplementedError
+
+def train_normalize_eeg_gnn(device: torch.device, args: Utils.Config.Args) -> Tuple[float, Optional[Dict]]:
     datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
-    best_acc = 0
-    best_combo = None
+    best_accuracy = 0
+    best_parameters = None
+
     if not args.search:
-        if args.group_mod == 'gender':
-            group1, group2 = get_data_loaders_gender(args)
-        else:
-            train_loaders = get_data_loaders_random(args, datasets)
-            group1, group2 = train_loaders[:2], train_loaders[2:]
-        def setup_trainer(loader, args):
-            trainer = Trainer.get_gnn_trainer(args)
-            trainer._set_data_loader(loader)
-            model = get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device)
-            trainer._set_model(model)
-            trainer.init_optimizer()
-            return trainer
-
-        trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
+        train_loaders = get_data_loaders_eeg_no_group(args)
+        group1, group2 = train_loaders[:2], train_loaders[2:]
+        test_metrics = setup_and_train_model(group1, group2, args, device)
         
-        for epoch in range(args.num_epochs_gnn):
-            metrics = [trainer._train_with_eeg(args, epoch) for trainer in trainers]
-            for i, metric in enumerate(metrics, 1):
-                print(f"Group{i}: {metric}")
-        print("=" * 50)
-
-        test_metrics = []
-        for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1], group2[1]]), 1):
-            tester = Trainer.get_gnn_trainer(args)
-            tester._set_data_loader(test_loader)
-            tester._set_model(get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device))
-            metric = tester._test_with_eeg(args)
-            test_metrics.append(metric)
+        for i, metric in enumerate(test_metrics, 1):
             print(f"Group{i} Test: {metric}")
     else:
-        param_dict = args.init_range_gnn()
-        print("=" * 50, "Searching")
-        for combo in param_dict:
-            
-            print(f"Combo: {combo}")
-            
-            args.group = combo['group']
-            args.node_learnable = combo['node_learnable']
-            args.eeg_hidden_size = combo['eeg_hidden_size']
-            args.eeg_dropout = combo['eeg_dropout']
-            args.num_layers = combo['num_layers']
-            args.batch_size = combo['batch_size']
-            args.data_sampler_strategy = combo['data_sampler_strategy']
-            args.optimizer = combo['optimizer']
-            args.rand_seed = combo['rand_seed']
-            args.num_epochs_gnn = combo['num_epochs_gnn']
-            args.l1_reg = combo['l1_reg']
-            args.l2_reg = combo['l2_reg']
-            args.lr = combo['lr']
-            
-            train_loaders = get_data_loaders_random(args, datasets)
-            group1, group2 = train_loaders[:2], train_loaders[2:]
-            
-            def setup_trainer(loader, args):
-                trainer = Trainer.get_gnn_trainer(args)
-                trainer._set_data_loader(loader)
-                model = get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device)
-                trainer._set_model(model)
-                trainer.init_optimizer()
-                return trainer
-            
-            trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
-            
-            for epoch in range(args.num_epochs_gnn):
-                [trainer._train_with_eeg(args, epoch) for trainer in trainers]
-
-            test_metrics = []
-            for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1], group2[1]]), 1):
-                tester = Trainer.get_gnn_trainer(args)
-                tester._set_data_loader(test_loader)
-                tester._set_model(get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device))
-                metric = tester._test_with_eeg(args)
-                test_metrics.append(metric)
-                print(f"acc: {metric}")
-            if test_metrics[0]['acc'] > best_acc:
-                best_acc = test_metrics[0]['acc']
-                best_combo = combo
+        parameter_combinations = args.init_range_gnn()
+        print("="* 50, "Searching")
+        for params in parameter_combinations:
+            print(f"Testing parameters: {params}")
+            update_model_paras(args, params)
+            try:
+                train_loaders = get_data_loaders_eeg_no_group(args)
+                group1, group2 = train_loaders[:2], train_loaders[2:]
+                test_metrics = setup_and_train_model(group1, group2, args, device)
+                
+                if test_metrics[0]['accuracy'] > best_accuracy:
+                    best_accuracy = test_metrics[0]['accuracy']
+                    best_parameters = params
+                    
+                print(f"Accuracy: {test_metrics[0]['accuracy']}")
+            except Exception as e:
+                print(f"Error during training with parameters {params}: {str(e)}")
+                continue
+                
         print("=" * 50)
-        print(f"Best Combo: {best_combo}, Best Acc: {best_acc}")
-        
-
-
-def main(args):
-    device = torch.device('cuda' if not args.cpu else 'cpu')
-    train_normalize_eeg_gnn(device, args)
-    # train_cnn_vae(device, args)
+        print(f"Best Parameters: {best_parameters}, Best Accuracy: {best_accuracy}")
     
-
-
-    # trained_model1 = group1_trainer.get_model()
-    # trained_model2 = group2_trainer.get_model()
-
-    # # 热力图可视化
-    # # visualize_lower_triangle(trained_model1.edge_weight.detach().cpu().numpy())
-    # # visualize_lower_triangle(trained_model2.edge_weight.detach().cpu().numpy())
-
-    # # 环形图可视化
-    # G = matrix_to_connectogram_data(trained_model1.edge_weight.detach().cpu().numpy(), total_part, regions_mapping)
-    # plot_connectogram(G, threshold=0.0001)
-    # plt.show()
-    # G = matrix_to_connectogram_data(trained_model2.edge_weight.detach().cpu().numpy(), total_part, regions_mapping)
-    # plot_connectogram(G, threshold=0.0001)
-    # plt.show()
-
-    # # 保存edge weight
-    # save_path = 'results'
-    # import time
-    # import os
-    # save_path = 'results'  
-    # os.makedirs(save_path, exist_ok=True)
-    # current_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
-    # np.save(f'{save_path}/model_1_edge_path_{current_time}', trained_model1.edge_weight.detach().cpu().numpy())
-    # np.save(f'{save_path}/model_2_edge_path_{current_time}', trained_model2.edge_weight.detach().cpu().numpy())
-=======
-from Datasets.DataloaderUtils import get_data_loader_cnn, get_data_loaders_eeg_group
-import models.trainer as Trainer
-from models.DGCNN import get_eeg_model
-from models.CNNVAE import get_cnn_model
-from models.Utils import *
+    return best_accuracy, best_parameters
 
 
 def train(args):
@@ -185,18 +138,19 @@ def train(args):
     print("=" * 50)
 
     def setup_trainer(loader, args):
-        trainer = Trainer.get_trainer(args)
+        trainer = Trainer.get_eeg_trainer(args)
         trainer._set_data_loader(loader)
-        model = get_eeg_model(args, trainer.edge_weight,
-                              trainer.edge_index).to(device)
+        model = get_gnn_model(args, trainer.edge_weight,
+                            trainer.edge_index).to(device)
         trainer._set_model(model)
         trainer.init_optimizer()
         return trainer
 
+    # TODO: improve: trans these code to funcs
     if args.model_mod == 'cnn':
         train_loader, test_loader = get_data_loader_cnn(args)
 
-        trainer = Trainer.get_trainer(args)
+        trainer = Trainer.get_video_trainer(args)
         trainer._set_data_loader(train_loader)
         model = get_cnn_model().to(device)
         trainer._set_model(model)
@@ -204,23 +158,21 @@ def train(args):
         for epoch in range(args.num_epochs_video):
             print(f"Epoch {epoch}")
             metrics = trainer._train_with_video(args, epoch)
-        print(f"Train: {metrics}")
+            print(f"Train: {metrics}")
 
-        tester = Trainer.get_trainer(args)
+        tester = Trainer.get_video_trainer(args)
         tester._set_data_loader(test_loader)
         tester._set_model(trainer.get_model())
-        model = model.to(device)
-        model.eval()
-        tester._set_model(model)
         metric = tester._test_with_video(args)
         print(f"Test: {metric}")
 
     elif args.model_mod == 'eeg_group':
-        train_loaders = get_data_loaders_eeg_group(args)
+        train_loaders = get_data_loaders_eeg_no_group(args)
         group1, group2 = train_loaders[:2], train_loaders[2:]
 
         trainers = [setup_trainer(loader, args)
-                    for loader in [group1[0], group2[0]]]
+                    for loader in [group1[0], group2[0]]
+                ]
 
         for epoch in range(args.num_epochs):
             print(f"Epoch {epoch}")
@@ -231,20 +183,39 @@ def train(args):
         print("=" * 50)
 
         test_metrics = []
-        for i, (trainer, test_loader) in enumerate(zip(trainers, [group1[1], group2[1]]), 1):
-            tester = Trainer.get_trainer(args)
+        for i, (trainer, test_loader) in \
+                enumerate(zip(trainers, [group1[1], group2[1]]), 1):
+            tester = Trainer.get_eeg_trainer(args)
             tester._set_data_loader(test_loader)
             tester._set_model(trainer.get_model())
             torch.save(trainer.get_model().state_dict(), f"{
-                       args.model_save_path}/model_group_{i}.pth")
-            metric = tester._test_with_eeg(args)
+                    args.model_save_path}/model_group_{i}.pth")
+            metric = tester._test_with_eeg()
             test_metrics.append(metric)
             print(f"Group{i} Test: {metric}")
 
-    elif args.mod == 'eeg':
-        pass
+    elif args.model_mod == 'eeg':
+        raise NotImplementedError("Not implemented yet")
+    elif args.model_mod == 'all':
+        train_loader, test_loader = get_data_loader_all(args)
+        trainer = Trainer.get_all_trainer(args)
+        model = get_mcdis_model(args).to(device)
+        trainer._set_model(model)
+        trainer.init_optimizer()
+        for epoch in range(args.num_epoch_mcdis):
+            print(f"Epoch {epoch}")
+            metrics = trainer._train(args, epoch)
+            print(f"Train: {metrics}")
+        print("=" * 50)
+
+        tester = Trainer.get_all_trainer(args)
+        tester._set_data_loader(test_loader)
+        tester._set_model(trainer.get_model())
+        metric = tester._test(args)
+        print(f"Test: {metric}")
 
 
+# TODO: improve trans these func to Utils
 def plot_ring_graph(G, threshold):
     """
     random seed = 42
@@ -255,7 +226,6 @@ def plot_ring_graph(G, threshold):
     G = (G - np.min(G)) / (np.max(G) - np.min(G))
     plt = visualize_brain_regions(G, threshold)
     plt.show()
->>>>>>> vim_branch
 
 
 def depersonalization(args):
@@ -274,67 +244,17 @@ def depersonalization(args):
     common = CommonExtraction(G1, G2)
     common._get_common_base()
     common._get_common_activation()
-    common._identify_common_pattern()
-    g_common = common._get_common_matrix()
+    common._identify_common_pattern(0.02)
+    g_common = common._get_common_base()
     node_common = (G1_node + G2_node) * 0.5
     return g_common, node_common
 
 
-<<<<<<< HEAD
-# # 
-#     group1_graphs = np.load('results/model_2_edge_path_2024-11-07-21-38-22.npy')
-#     group2_graphs = np.load('results/model_2_edge_path_2024-11-07-21-38-22.npy')
-#     group1_graphs = trans_triangular_to_full_matrix(group1_graphs)
-#     group2_graphs = trans_triangular_to_full_matrix(group2_graphs)
-#     deidentifier = ComprehensiveDeidentification(n_components=16)
-#     W_common, metrics, patterns = deidentifier.perform_deidentification(group1_graphs, group2_graphs)
-    # G = matrix_to_connectogram_data(group1_graphs, total_part, regions_mapping)
-    # plot_connectogram(G, threshold=0.0001)
-    # plt.show()
-    # G = matrix_to_connectogram_data(group2_graphs, total_part, regions_mapping)
-    # plot_connectogram(G, threshold=0.0001)
-    # plt.show()
-    # G = matrix_to_connectogram_data(W_common, total_part, regions_mapping)
-    # plot_connectogram(G, threshold=0.0001)
-    # plt.show()
-    
-    
-    # group1_graphs = group1_graphs * 100
-    # region_matrix, region_names = matrix_to_region_matrix(group1_graphs, total_part, regions_mapping)
-    # plot_region_connectogram(region_matrix, region_names, threshold=0.0001)
-    # plt.show()
-    
-    
-    # group2_graphs = group2_graphs * 100
-    # region_matrix, region_names = matrix_to_region_matrix(group2_graphs, total_part, regions_mapping)
-    # plot_region_connectogram(region_matrix, region_names, threshold=0.0001)
-    # plt.show()
-    
-    # W_common = W_common / 20
-    # region_matrix, region_names = matrix_to_region_matrix(W_common, total_part, regions_mapping)
-    # plot_region_connectogram(region_matrix, region_names, threshold=0.0001)
-    # plt.show()
-    
-    # group1_graphs = (group1_graphs - group1_graphs.min()) / (group1_graphs.max() - group1_graphs.min())
-    # group2_graphs = (group2_graphs - group2_graphs.min()) / (group2_graphs.max() - group2_graphs.min())
-    # W_common = (W_common - W_common.min()) / (W_common.max() - W_common.min())
-    # region_matrix, region_names = matrix_to_region_matrix(W_common, total_part, regions_mapping)
-    # # fig = plot_brain_connectivity_multiple_views(region_matrix, region_names, threshold=0.01)
-    # # plt.show()
-    # region_matrix, region_names = matrix_to_region_matrix(group1_graphs, total_part, regions_mapping)
-    # fig = plot_brain_connectivity_multiple_views(region_matrix, region_names, threshold=0.001)
-    # plt.show()
-    # region_matrix, region_names = matrix_to_region_matrix(group2_graphs, total_part, regions_mapping)
-    # fig = plot_brain_connectivity_multiple_views(region_matrix, region_names, threshold=0.001)
-    # plt.show()
-# 
-    
-=======
 def main(args):
-    # train(args)
-    edge, node = depersonalization(args)
+    train(args)
+    # edge, node = depersonalization(args)
+    # train_normalize_eeg_gnn(device, args)
 
->>>>>>> vim_branch
 
 if __name__ == '__main__':
     args = Utils.Config.init()

@@ -1,4 +1,6 @@
 import torch
+from typing import Dict, List, Union
+from torch import Tensor
 FPS = 30-1
 
 
@@ -41,13 +43,13 @@ class SequenceCollator:
             max_length[key] = max(s[key].size(0) for s in batch)
         
         if self.sequence_length is not None:
-            max_lengths = {k: self.sequence_length for k in max_lengths}
+            max_length = {k: self.sequence_length for k in max_length}
         
         processed_batch = {
             'sub_id': [],
             'slice_id': [],
             'label': [],
-            'lengths': []
+            'lengths': []  # 这个列表会被填充
         }
 
         processed_batch.update({k: [] for k in self.include})
@@ -56,14 +58,13 @@ class SequenceCollator:
             processed_batch['sub_id'].append(sample['sub_id'])
             processed_batch['slice_id'].append(sample['slice_id'])
             processed_batch['label'].append(sample['label'])
+            # 添加序列长度信息
+            sample_lengths = [sample[key].size(0) for key in self.include]
+            processed_batch['lengths'].append(max(sample_lengths))  # 使用最大长度
             for key in self.include:
                 processed_batch[key].append(sample[key])
 
-<<<<<<< HEAD
-=======
-        
->>>>>>> vim_branch
-        result = {
+        result: Dict[str, Union[List, Tensor]]  = {
             'sub_id': processed_batch['sub_id'],
             'slice_id': processed_batch['slice_id'],
         }
@@ -73,9 +74,4 @@ class SequenceCollator:
         for key in self.include:
             result[key] = torch.stack(processed_batch[key])
         
-<<<<<<< HEAD
-=======
-
->>>>>>> vim_branch
         return result
-

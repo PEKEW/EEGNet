@@ -13,26 +13,7 @@ import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
-<<<<<<< HEAD
-import warnings
-import torch
-from PIL import Image
-import os
-import json
-import tarfile
-import mne
-from pathlib import Path
-import re
-from pathlib import Path
-import tarfile
-import mne
-import torch
-from PIL import Image
-import torchvision.transforms as transforms
-from torch.utils.data import Dataset
-=======
 
->>>>>>> vim_branch
 
 class VRSicknessDataset(Dataset):
 
@@ -45,11 +26,7 @@ class VRSicknessDataset(Dataset):
     EEG_DIR_STR = 'EEGData'
     LABEL_DIR_STR = 'labels.json'
 
-<<<<<<< HEAD
-    def __init__(self, root_dir, transform=None, mod:list=['eeg', 'original', 'optical','log']):
-=======
     def __init__(self, root_dir, transform=None, mod: list = ['eeg', 'video', 'log']):
->>>>>>> vim_branch
         self.root_dir = Path(root_dir)
         self.frame_dir = self.root_dir / self.FRAME_DIR_STR
         self.eeg_dir = self.root_dir / self.EEG_DIR_STR
@@ -66,97 +43,105 @@ class VRSicknessDataset(Dataset):
             self._load_all_eeg()
 
     def _get_valid_samples(self):
-        """获取所有有效的样本对（sub_id, slice_id）"""
+        def get_slice_id(text, pattern):
+            match = pattern.search(text)
+            return match.group(1) if match else None
         valid_samples = []
         for frame_tar in self.frame_dir.glob('*_combined.tar'):
-            sub_id = self.SUB_ID_PATTERN.search(frame_tar.name).group(1)
-            eeg_tar = self.eeg_dir / f'{sub_id}.tar'
-            if not eeg_tar.exists():
+            sub_id_match = get_slice_id(frame_tar.name, self.SUB_ID_PATTERN)
+            if not sub_id_match:
                 continue
-            if sub_id not in self.motion_data:
+            sub_id = sub_id_match
+            eeg_tar = self.eeg_dir / f'{sub_id}.tar'
+            if not eeg_tar.exists() or sub_id not in self.motion_data:
                 continue
             with tarfile.open(frame_tar, 'r') as tar:
-                frame_files = tar.getnames()
+                frame_files = [f for f in tar.getnames() if 'optical.png' in f]
             with tarfile.open(eeg_tar, 'r') as tar:
-                eeg_files = tar.getnames()
-            original_frame_slices = set(self.SLICE_ID_PATTERN_TYPO.search(f).group(1)
-                                        for f in frame_files if 'optical.png' in f)
-            optical_frame_slices = set(self.SLICE_ID_PATTERN_TYPO.search(f).group(1)
-<<<<<<< HEAD
-                                for f in frame_files if 'optical.png' in f)
-=======
-                                       for f in frame_files if 'optical.png' in f)
->>>>>>> vim_branch
-            eeg_slices = set(self.SLICE_ID_PATTERN.search(f).group(1)
-                            for f in eeg_files if f.endswith('.set'))
-            motion_slices = set(self.SLICE_ID_PATTERN.search(k).group(1)
-                                for k in self.motion_data[sub_id].keys())
-            valid_slices = optical_frame_slices & original_frame_slices & eeg_slices & motion_slices
-            for slice_id in valid_slices:
-                valid_samples.append((sub_id, slice_id))
+                eeg_files = [f for f in tar.getnames() if f.endswith('.set')]
+            optical_frame_slices = {
+                slice_id
+                for f in frame_files
+                if (slice_id := get_slice_id(f, self.SLICE_ID_PATTERN_TYPO))
+            }
+            eeg_slices = {
+                slice_id
+                for f in eeg_files
+                if (slice_id := get_slice_id(f, self.SLICE_ID_PATTERN))
+            }
+            motion_slices = {
+                slice_id
+                for k in self.motion_data[sub_id].keys()
+                if (slice_id := get_slice_id(k, self.SLICE_ID_PATTERN))
+            }
+            valid_slices = optical_frame_slices & eeg_slices & motion_slices
+            valid_samples.extend((sub_id, slice_id) for slice_id in valid_slices)
+                
         return valid_samples
-<<<<<<< HEAD
-    
-    def _load_frames(self, sub_id, slice_id, _include = ['optical', 'original']):
-=======
 
     def _load_frames(self, sub_id, slice_id):
->>>>>>> vim_branch
-        """加载图片数据"""
+        def get_frame_id(name: str) -> int:
+            match = self.FRAME_ID_PATTERN.search(name)
+            if match is None:
+                raise ValueError(f"Invalid frame name format: {name}")
+            numeric_id = match.group(1)
+            if numeric_id is None:
+                raise ValueError(f"Could not extract frame ID from: {name}")
+            return int(numeric_id)
+        
         tar_path = self.frame_dir / f'{sub_id}_combined.tar'
         frames = {'optical': [], 'original': []}
-
+        pattern = f'sub_{sub_id}_sclice_{slice_id}_frame_'
+        
         with tarfile.open(tar_path, 'r') as tar:
-            pattern = f'sub_{sub_id}_sclice_{slice_id}_frame_'
-            frame_members = [m for m in tar.getmembers()
-                             if pattern in m.name]
+            frame_members = []
+            for m in tar.getmembers():
+                if pattern not in m.name:
+                    continue
+                try:
+                    frame_id = get_frame_id(m.name)
+                    frame_members.append(m)
+                except ValueError:
+                    continue
             if not frame_members:
-                raise ValueError(f"No frames found for sub_{
-                                 sub_id}, slice_{slice_id}")
-            frame_members.sort(key=lambda x: int(
-                self.FRAME_ID_PATTERN.search(x.name).group(1)))
-
+                raise ValueError(f"No frames found for sub_{sub_id}, slice_{slice_id}")
+            frame_members.sort(key=lambda x: get_frame_id(x.name))
             for member in frame_members:
                 frame_file = tar.extractfile(member)
-                image = Image.open(frame_file).convert('RGB')
-                if self.transform:
-                    image_tensor = self.transform(image)
-                else:
-                    default_transform = transforms.Compose([
+                if frame_file is None:
+                    continue
+                try:
+                    image = Image.open(frame_file).convert('RGB')
+                    transform = self.transform or transforms.Compose([
                         transforms.ToTensor()
                     ])
-                    image_tensor = default_transform(image)
-
-                if 'optical.png' in member.name:
-                    frames['optical'].append(image_tensor)
-                elif 'original.png' in member.name:
-                    frames['original'].append(image_tensor)
-
-        if not frames['optical'] or not frames['original']:
-            raise ValueError(f"Missing frames for sub_{
-                             sub_id}, slice_{slice_id}")
-
+                    image_tensor = transform(image)
+                    if 'optical.png' in member.name:
+                        frames['optical'].append(image_tensor)
+                    elif 'original.png' in member.name:
+                        frames['original'].append(image_tensor)
+                finally:
+                    frame_file.close()
+        # if not frames['optical'] or not frames['original']:
+        #     raise ValueError(f"Missing frames for sub_{sub_id}, slice_{slice_id}")
         optical_stack = torch.stack(frames['optical'])
         original_stack = torch.stack(frames['original'])
-
-        assert len(optical_stack) == len(original_stack), \
-            f"Mismatched frame counts for sub_{sub_id}, slice_{slice_id}"
-
+        if len(optical_stack) != len(original_stack):
+            raise ValueError(
+                f"Mismatched frame counts for sub_{sub_id}, slice_{slice_id}: "
+                f"optical={len(optical_stack)}, original={len(original_stack)}"
+            )
+        
         return optical_stack, original_stack
 
     def _load_all_eeg(self):
-        """每个sub_id的tar都至少需要打开一次
-        因此每次打开一个sub_id时
-        就把所有的数据都加载出来放到内存
-        这种方法只有sub_id次相关I/O
-        """
         sub_id_set = set(sub_id for sub_id, _ in self.samples)
         for sub_id in sub_id_set:
             tar_path = self.eeg_dir / f'{sub_id}.tar'
             with tarfile.open(tar_path, 'r') as tar:
                 tar.extractall(path='/tmp')
             slice_id_set = set(slice_id for s_id,
-                               slice_id in self.samples if s_id == sub_id)
+                            slice_id in self.samples if s_id == sub_id)
             for slice_id in slice_id_set:
                 set_name = f'{sub_id}_slice_{slice_id}.set'
                 try:
@@ -174,21 +159,19 @@ class VRSicknessDataset(Dataset):
                     os.remove(f'/tmp/{set_name}')
 
     def _load_motion(self, sub_id, slice_id):
-        """加载运动数据"""
+        padding_mod = 'last'  # last | first
+
         slice_data = self.motion_data[sub_id][f'slice_{slice_id}']
-
-        # 按帧ID排序
+        match = self.SLICE_ID_PATTERN.search(slice_data['slice_id'])
+        if match is None:
+            raise ValueError(f"Invalid slice ID format: {slice_data['slice_id']}")
         frame_ids = sorted(slice_data.keys(), key=lambda x: int(
-            self.FRAME_ID_PATTERN.search(x).group(1)))
+            match.group(1)))
 
-        # TODO: important !!! 这里的motion features 不足30 需要做补全
-        # TODO: important 补全考虑：avg max ones
         motion_features = []
         for frame_id in frame_ids:
             frame_data = slice_data[frame_id]
-            # 解析位置字符串
-            pos = eval(frame_data['pos'])  # 将字符串"(x,y,z)"转换为元组
-
+            pos = eval(frame_data['pos'])
             features = [
                 float(frame_data['time_']),
                 float(frame_data['speed']),
@@ -199,11 +182,21 @@ class VRSicknessDataset(Dataset):
                 pos[0], pos[1], pos[2]
             ]
             motion_features.append(features)
-
+        
+        num_frames = len(motion_features)
+        if num_frames < 30:
+            padding_features = (
+                motion_features[-1] if padding_mod == 'last'
+                else motion_features[0] if padding_mod == 'first'
+                else None
+            )
+            
+            if padding_features is None:
+                raise NotImplementedError(f"Unsupported padding mode: {padding_mod}")
+            motion_features.extend([padding_features] * (30 - num_frames))
         return torch.FloatTensor(motion_features)
 
     def _load_label(self, sub_id, slice_id):
-        """加载标签"""
         return torch.FloatTensor([self.labels[sub_id][f'slice_{slice_id}']])
 
     def __len__(self):
@@ -211,20 +204,6 @@ class VRSicknessDataset(Dataset):
 
     def __getitem__(self, idx):
         sub_id, slice_id = self.samples[idx]
-<<<<<<< HEAD
-        optical, original, motion_data = None, None, None
-        
-        try:
-            if 'original' in self.mod and 'optical' in self.mod:
-                optical, original = self._load_frames(sub_id, slice_id)
-            elif 'original' in self.mod:
-                _, original = self._load_frames(sub_id, slice_id, _include=['original'])
-                optical = None
-            elif 'optical' in self.mod:
-                optical, _ = self._load_frames(sub_id, slice_id, _include=['optical'])
-                original = None
-                
-=======
 
         try:
             if 'original' in self.mod:
@@ -235,7 +214,6 @@ class VRSicknessDataset(Dataset):
                     sub_id, slice_id)
             else:
                 optical_frames, original_frames = None, None
->>>>>>> vim_branch
             if 'log' in self.mod:
                 motion_data = self._load_motion(sub_id, slice_id)
             else:
@@ -246,13 +224,8 @@ class VRSicknessDataset(Dataset):
             return {
                 'sub_id': sub_id,
                 'slice_id': slice_id,
-<<<<<<< HEAD
-                'optical': optical,
-                'original': original,
-=======
                 'optical': optical_frames,
                 'original': original_frames,
->>>>>>> vim_branch
                 'eeg': self.eeg_data[sub_id][slice_id] if 'eeg' in self.mod else None,
                 'motion': motion_data,
                 'label': labels
@@ -260,39 +233,5 @@ class VRSicknessDataset(Dataset):
 
         except Exception as e:
             print(f"Error loading sample (sub_{
-                  sub_id}, slice_{slice_id}): {str(e)}")
+                sub_id}, slice_{slice_id}): {str(e)}")
             return None
-<<<<<<< HEAD
-        
-    @staticmethod
-    def _compute_statistics(original_frames, optical_frames, eeg, motion):
-        """优化的统计计算"""
-        with torch.no_grad():
-            return {
-                'original_frames_stats': {
-                    'mean': original_frames.mean().item(),
-                    'std': original_frames.std().item(),
-                    'min': original_frames.min().item(),
-                    'max': original_frames.max().item()
-                },
-                'optical_frames_stats': {
-                    'mean': optical_frames.mean().item(),
-                    'std': optical_frames.std().item(),
-                    'min': optical_frames.min().item(),
-                    'max': optical_frames.max().item()
-                },
-                'eeg_stats': {
-                    'mean': eeg.mean().item(),
-                    'std': eeg.std().item(),
-                    'min': eeg.min().item(),
-                    'max': eeg.max().item()
-                },
-                'motion_stats': {
-                    'mean': motion.mean().item(),
-                    'std': motion.std().item(),
-                    'min': motion.min().item(),
-                    'max': motion.max().item()
-                }
-            }
-=======
->>>>>>> vim_branch
