@@ -47,6 +47,7 @@ class AttentionRes(nn.Module):
         )
 
     def forward(self, eeg, video):
+        # ERROR: eeg shape " 16, 2" 
         batch_size = eeg.shape[0]
 
         eeg_hidden = self.eeg_proj(eeg)
@@ -84,11 +85,11 @@ class MCDIS(nn.Module):
         super(MCDIS, self).__init__()
 
         self.args = args
-        self.bae = OutterBAE(33, 32)
-        self.dgcn = DGCNN(args, edge_weight, edge_idx,
-                        num_hiddens=args.num_hiddens,
-                        num_layers=args.num_layers,
-                        dropout=args.dropout,
+        self.bae = OutterBAE((32, 32))
+        self.dgcn = DGCNN(edge_weight, edge_idx,
+                        num_hiddens=args.gnn_hiddens_size,
+                        num_layers=args.gnn_num_layers,
+                        dropout=args.gnn_dropout,
                         node_learnable=args.node_learnable)
         self.Dtf = DTF
         self.combine = AttentionRes(input_dim=930,

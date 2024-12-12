@@ -21,7 +21,7 @@ def _get_edge_weight(args):
         edge_idx = w.state_dict()['edge_idx']
     except Exception:
         print("fail to load pretrained model")
-        _, edge_weight, edge_idx = get_edge_weight()
+        _, edge_idx, edge_weight = get_edge_weight()
     return edge_weight, edge_idx
 
 
@@ -53,7 +53,7 @@ def train_cnn_vae(device: torch.device, args: Utils.Config.Args):
     model = get_cnn_model().to(device)
     trainer._set_model(model)
     trainer.init_optimizer()
-    for epoch in range(args.num_epochs_video):
+    for epoch in range(args.cnn_num_epochs):
         # print(f"Epoch {epoch}")
         metric = trainer._train_with_video(args, epoch)
         # print(f"Train: {metric}")
@@ -61,7 +61,7 @@ def train_cnn_vae(device: torch.device, args: Utils.Config.Args):
     tester = Trainer.get_video_trainer(args)
     tester._set_data_loader(test_loader)
     tester._set_model(get_cnn_model().to(device))
-    metric = tester._test_with_video(args)
+    metric = tester._test_with_video()
     print(f"Test: {metric}")
 
 def setup_and_train_model(group1, group2, args, device):
@@ -76,7 +76,7 @@ def setup_and_train_model(group1, group2, args, device):
     trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
     
     # Training
-    for epoch in range(args.num_epochs_gnn):
+    for epoch in range(args.gnn_num_epochs):
         metrics = [trainer._train_with_eeg(args, epoch) for trainer in trainers]
     
     # Testing
@@ -155,7 +155,7 @@ def train(args):
         model = get_cnn_model().to(device)
         trainer._set_model(model)
         trainer.init_optimizer()
-        for epoch in range(args.num_epochs_video):
+        for epoch in range(args.cnn_num_epochs):
             print(f"Epoch {epoch}")
             metrics = trainer._train_with_video(args, epoch)
             print(f"Train: {metrics}")
@@ -163,7 +163,7 @@ def train(args):
         tester = Trainer.get_video_trainer(args)
         tester._set_data_loader(test_loader)
         tester._set_model(trainer.get_model())
-        metric = tester._test_with_video(args)
+        metric = tester._test_with_video()
         print(f"Test: {metric}")
 
     elif args.model_mod == 'eeg_group':
@@ -188,8 +188,7 @@ def train(args):
             tester = Trainer.get_eeg_trainer(args)
             tester._set_data_loader(test_loader)
             tester._set_model(trainer.get_model())
-            torch.save(trainer.get_model().state_dict(), f"{
-                    args.model_save_path}/model_group_{i}.pth")
+            torch.save(trainer.get_model().state_dict(), f"{args.model_save_path}/model_group_{i}.pth")
             metric = tester._test_with_eeg()
             test_metrics.append(metric)
             print(f"Group{i} Test: {metric}")
@@ -199,10 +198,11 @@ def train(args):
     elif args.model_mod == 'all':
         train_loader, test_loader = get_data_loader_all(args)
         trainer = Trainer.get_all_trainer(args)
+        trainer._set_data_loader(train_loader)
         model = get_mcdis_model(args).to(device)
         trainer._set_model(model)
         trainer.init_optimizer()
-        for epoch in range(args.num_epoch_mcdis):
+        for epoch in range(args.mcdis_num_epochs):
             print(f"Epoch {epoch}")
             metrics = trainer._train(args, epoch)
             print(f"Train: {metrics}")

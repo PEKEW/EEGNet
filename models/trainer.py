@@ -370,7 +370,7 @@ def get_gnn_trainer(args) -> DGCNNTrainer:
         lr=args.lr,
         l1_reg=args.l1_reg,
         l2_reg=args.l2_reg,
-        num_epochs=args.num_epochs_gnn,
+        num_epochs=args.gnn_num_epochs,
         optimizer=optimizer
     )
 
@@ -474,7 +474,7 @@ def get_eeg_trainer(args) -> DGCNNTrainer:
         lr=args.lr,
         l1_reg=args.l1_reg,
         l2_reg=args.l2_reg,
-        num_epochs=args.num_epochs_gnn,
+        num_epochs=args.gnn_num_epochs,
         optimizer=args.optimizer
     )
 

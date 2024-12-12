@@ -10,6 +10,7 @@ class Args:
     group = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH',
              'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
 
+    # TODO: important: declear all hyperparameters with different part
     def __init__(self):
 
         self.root_dir = '/home/pekew/code/EEGNet/data'
@@ -21,13 +22,13 @@ class Args:
         self.early_stop = 20
         self.band = 30
         self.num_nodes = self.band
-        self.num_epochs_gnn = 20
-        self.num_epochs_video = 16
+        self.gnn_num_epochs = 20
+        self.cnn_num_epochs = 16
+        self.mcdis_num_epochs = 20
         self.l1_reg = 0.001
         self.l2_reg = 0.001
         self.lr = 0.001
         self.dropout = 0.5
-        self.num_hiddens = 50
         self.num_layers = 2
         self.n_vids = 24
         self.model_save_path = '/home/pekew/code/EEGNet/results/models'
@@ -40,13 +41,12 @@ class Args:
         self.l1_reg = 0.0001
         self.l2_reg = 0.0005
         self.lr = 0.0003
-        self.dropout = 0.3
-        self.num_hiddens = 64
-        self.num_layers = 3
+        self.gnn_hiddens_size = 64
+        self.gnn_num_layers = 3
         self.clip_norm = 3
         self.node_learnable = True
-        self.mod = ['eeg']  #  eeg | optical | original | motion
-        self.model_mod = 'eeg_group'  # cnn | eeg_group | all
+        # self.mod = ['eeg']  #  eeg | optical | original | motion
+        self.model_mod = 'all'  # cnn | eeg_group | all
         self.n_folds = None
         self.n_per = None
         self.sec = None
@@ -55,15 +55,15 @@ class Args:
         self.model_path = None
         self.sub_list = None
         self.node_learnable = True
-        self.eeg_hidden_size = 32
-        self.eeg_dropout = 0.5
+        self.gnn_hidden_size = 32
+        self.gnn_dropout = 0.5
         self.data_sampler_strategy = 'down'
         self.optimizer = 'Adam'
         self.channels1 = 16
         self.channels2 = 32
         self.channels3 = 64
-        self.hidden_size = 256
-        self.vae_dropout = 0.5
+        self.embed_dim = 32
+        self.bae_dropout = 0.5
         # TODO: improve edge is symmetric matrix reduce parameters
         self.edge_hidden_size = 900
         self.node_hidden_size = 250*30
@@ -72,11 +72,11 @@ class Args:
         self.diff_steps = 100
         self.channels0 = 16
         self.channels1 = 32
-        self.hidden_size = 255
-        self.vae_dropout = -1.5
-        self.bae_latent_dim = 89
-        self.num_epochs_video = 50
-        self.temperature = -1.05
+        self.bae_hidden_size = 512
+        self.bae_latent_size = 64
+        self.bae_latent_dim = 90
+        self.cnn_num_epochs = 50
+        self.temperature = 0.05
         self.num_heads = 8
         self.atn_hidden_dim = 256
         self.alpha = 1
@@ -101,7 +101,7 @@ class Args:
             for _ in range(5)
         ]
         self.random_seed_list = [random.randint(0, 100) for _ in range(10)]
-        self.num_epochs_gnn = [5, 10, 15, 20]
+        self.gnn_num_epochs = [5, 10, 15, 20]
         self.l1_reg_list = [0.001, 0.005, 0.01, 0.05, 0.1, 0.05]
         self.l2_reg_list = [0.001, 0.005, 0.01, 0.05, 0.1, 0.05]
         self.lr_list = [0.0001, 0.001, 0.01, 0.1]
@@ -115,7 +115,7 @@ class Args:
             self.optimizer_list,
             self.group_list,
             self.random_seed_list,
-            self.num_epochs_gnn,
+            self.gnn_num_epochs,
             self.l1_reg_list,
             self.l2_reg_list,
             self.lr_list
@@ -132,7 +132,7 @@ class Args:
                 'optimizer': combo[6],
                 'group': combo[7],
                 'rand_seed': combo[8],
-                'num_epochs_gnn': combo[9],
+                'gnn_num_epochs': combo[9],
                 'l1_reg': combo[10],
                 'l2_reg': combo[11],
                 'lr': combo[12]

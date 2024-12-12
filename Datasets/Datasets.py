@@ -77,7 +77,9 @@ class VRSicknessDataset(Dataset):
             valid_slices = optical_frame_slices & eeg_slices & motion_slices
             valid_samples.extend((sub_id, slice_id) for slice_id in valid_slices)
                 
-        return valid_samples
+        # TODO: important cut samples for test
+        # return valid_samples
+        return valid_samples[0:500]
 
     def _load_frames(self, sub_id, slice_id):
         def get_frame_id(name: str) -> int:
@@ -159,14 +161,14 @@ class VRSicknessDataset(Dataset):
                     os.remove(f'/tmp/{set_name}')
 
     def _load_motion(self, sub_id, slice_id):
+        def sort_frame_ids(x):
+            match = self.FRAME_ID_PATTERN.search(x)
+            if match is None:
+                raise ValueError(f"Invalid frame name format: {x}")
+            return int(match.group(1))
         padding_mod = 'last'  # last | first
-
         slice_data = self.motion_data[sub_id][f'slice_{slice_id}']
-        match = self.SLICE_ID_PATTERN.search(slice_data['slice_id'])
-        if match is None:
-            raise ValueError(f"Invalid slice ID format: {slice_data['slice_id']}")
-        frame_ids = sorted(slice_data.keys(), key=lambda x: int(
-            match.group(1)))
+        frame_ids = sorted(slice_data.keys(), key=sort_frame_ids)
 
         motion_features = []
         for frame_id in frame_ids:
@@ -214,7 +216,7 @@ class VRSicknessDataset(Dataset):
                     sub_id, slice_id)
             else:
                 optical_frames, original_frames = None, None
-            if 'log' in self.mod:
+            if 'motion' in self.mod:
                 motion_data = self._load_motion(sub_id, slice_id)
             else:
                 motion_data = None
@@ -232,6 +234,5 @@ class VRSicknessDataset(Dataset):
             }
 
         except Exception as e:
-            print(f"Error loading sample (sub_{
-                sub_id}, slice_{slice_id}): {str(e)}")
+            print(f"Error loading sample (sub_{sub_id}, slice_{slice_id}): {str(e)}")
             return None

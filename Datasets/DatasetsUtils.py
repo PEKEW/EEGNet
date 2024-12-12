@@ -4,7 +4,7 @@ from torch import Tensor
 FPS = 30-1
 
 
-# todo 这里要考虑不同长度的序列 而且要考虑不同的数据类型
+# TODO: important there have to consider different length of sequence and different data type
 class SequenceCollator:
     def __init__(self,
                 sequence_length=None,
@@ -31,9 +31,6 @@ class SequenceCollator:
         return torch.cat([sequence, pad], dim=0)
         
     def __call__(self, batch):
-        """
-        可序列化的 collate 函数
-        """
         batch = [b for b in batch if b is not None]
         if not batch:
             return []
@@ -49,7 +46,7 @@ class SequenceCollator:
             'sub_id': [],
             'slice_id': [],
             'label': [],
-            'lengths': []  # 这个列表会被填充
+            'lengths': []
         }
 
         processed_batch.update({k: [] for k in self.include})
@@ -58,9 +55,8 @@ class SequenceCollator:
             processed_batch['sub_id'].append(sample['sub_id'])
             processed_batch['slice_id'].append(sample['slice_id'])
             processed_batch['label'].append(sample['label'])
-            # 添加序列长度信息
             sample_lengths = [sample[key].size(0) for key in self.include]
-            processed_batch['lengths'].append(max(sample_lengths))  # 使用最大长度
+            processed_batch['lengths'].append(max(sample_lengths))
             for key in self.include:
                 processed_batch[key].append(sample[key])
 
