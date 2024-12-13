@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import SGConv
 from torch_scatter import scatter_add
-from models.Utils import normalize_matrix
+from models.Utils import normalize_matrix, normalize_matrix_batch
 
 
 def maybe_num_nodes(edge_idx, num_nodes=None):
@@ -36,63 +36,62 @@ def add_remaining_self_loops(edge_idx, edge_weight, fill_value=1, num_nodes=None
 
 class _SGConv(SGConv):
     def __init__(self, num_features, num_classes, K=2, cached=False, bias=True):
-        super(_SGConv, self).__init__(num_features, num_classes, K, cached, bias)
+        super(_SGConv, self).__init__(
+            num_features, num_classes, K, cached, bias)
         self.cached_result = None
         nn.init.xavier_normal_(self.lin.weight)
         if K < 1:
             raise ValueError(f"K should be >= 1, got {K}")
-    
+
     @staticmethod
     def norm(edge_idx, num_nodes, edge_weight, improved=False, dtype=None):
         """Normalization of the graph adjacency matrix.
         """
         if edge_weight is None:
             edge_weight = torch.ones((edge_idx.size(1), ),
-                                dtype=dtype,
-                                device=edge_idx.device)
-            
+                                     dtype=dtype,
+                                     device=edge_idx.device)
+
         fill_value = 2 if improved else 1
         edge_idx, edge_weight = add_remaining_self_loops(
             edge_idx, edge_weight, fill_value, num_nodes)
-            
+
         row, col = edge_idx
         deg = scatter_add(edge_weight, row, dim=0, dim_size=num_nodes)
         deg_inv_sqrt = deg.pow(-0.5)
         deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-            
+
         return edge_idx, deg_inv_sqrt[row] * edge_weight * deg_inv_sqrt[col]
-    
-    
+
     def forward(self, x, edge_index,
                 edge_weight: Optional[torch.Tensor] = None) -> torch.Tensor:
         if not self.cached or self.cached_result is None:
             edge_index, norm_weight = self.norm(
                 edge_index, x.size(0), edge_weight, dtype=x.dtype)
-            
+
             self.cached_result = x
             for k in range(self.K):
                 self.cached_result = self.propagate(edge_index,
-                                                x=self.cached_result,
-                                                edge_weight=norm_weight)
-        
+                                                    x=self.cached_result,
+                                                    edge_weight=norm_weight)
+
         return self.lin(self.cached_result)
-    
+
     def message(self, x_j, edge_weight):
         return edge_weight.view(-1, 1) * x_j
-        
 
 
 class DGCNN(nn.Module):
     def __init__(self,
-                edge_weight,
-                edge_idx,
-                num_features=250,
-                num_nodes=30,
-                num_hiddens=64,
-                num_classes=2,
-                num_layers=2,
-                dropout=0.5,
-                node_learnable=False):
+                 edge_weight,
+                 edge_idx,
+                 num_features=250,
+                 num_nodes=30,
+                 num_hiddens=64,
+                 num_classes=2,
+                 num_layers=2,
+                 dropout=0.5,
+                 node_learnable=False):
         """DGCNN model
         Args:
             device (torch.device): model device.
@@ -127,7 +126,7 @@ class DGCNN(nn.Module):
         self.dropout_layer = nn.Dropout(p=self.dropout)
         self.bn1 = nn.BatchNorm1d(num_features)
         self.conv1 = _SGConv(num_features=num_features,
-                            num_classes=num_hiddens, K=num_layers)
+                             num_classes=num_hiddens, K=num_layers)
         fc_input_dim = num_hiddens * num_nodes
         self.hidden_sizes = [
             fc_input_dim,
@@ -159,11 +158,11 @@ class DGCNN(nn.Module):
         """
         if not isinstance(edge_idx, torch.Tensor):
             edge_idx = torch.LongTensor(edge_idx)
-        
-        edge_idx_all = torch.zeros((2, edge_idx.shape[1] * batch_size), 
-                                dtype=torch.long)
-        data_batch = torch.zeros(self.num_nodes * batch_size, 
-                                dtype=torch.long)
+
+        edge_idx_all = torch.zeros((2, edge_idx.shape[1] * batch_size),
+                                   dtype=torch.long)
+        data_batch = torch.zeros(self.num_nodes * batch_size,
+                                 dtype=torch.long)
         for i in range(batch_size):
             start_idx = i * edge_idx.shape[1]
             end_idx = (i + 1) * edge_idx.shape[1]
@@ -171,7 +170,7 @@ class DGCNN(nn.Module):
             start_node = i * self.num_nodes
             end_node = (i + 1) * self.num_nodes
             data_batch[start_node:end_node] = i
-        device = next(self.parameters()).device 
+        device = next(self.parameters()).device
         return edge_idx_all.to(device), data_batch.to(device)
 
     def forward(self, x):
@@ -201,6 +200,45 @@ class DGCNN(nn.Module):
             if i < len(self.fc_layers) - 1:
                 x = F.relu(x)
 
+        return x
+
+    def forward_embedding(self, x):
+        batch_size = len(x)
+        if self.node_embedding is not None:
+            node_embedding = self.node_embedding.unsqueeze(
+                0).repeat(batch_size, 1, 1)
+            x = x + node_embedding
+        edge_idx, _ = self.append(self.edge_idx, batch_size)
+        edge_weight = torch.zeros(
+            (self.num_nodes, self.num_nodes), device=edge_idx.device)
+        edge_weight[self.xs.to(edge_weight.device), self.ys.to(
+            edge_weight.device)] = self.edge_weight
+        edge_weight = edge_weight + \
+            edge_weight.transpose(1, 0) - torch.diag(edge_weight.diagonal())
+        edge_weight = normalize_matrix(edge_weight)
+        edge_weight = edge_weight.reshape(-1).repeat(batch_size)
+        x = self.bn1(x.transpose(1, 2)).transpose(1, 2)
+        x = x.reshape(-1, x.shape[-1])
+        x = self.conv1(x, edge_idx, edge_weight)
+        x = x.view((batch_size, -1))
+        # [16, 30, 64]
+        x = x.reshape(batch_size, self.num_nodes, -1)
+        return x
+
+    def forward_embedding_with_info(self, x, edge_weight, node_embedding):
+        x = x + node_embedding
+        batch_size = len(x)
+        edge_idx, _ = self.append(self.edge_idx, batch_size)
+        edge_weight = edge_weight + \
+            edge_weight.transpose(
+                1, 2) - torch.diag_embed(edge_weight.diagonal(dim1=1, dim2=2))
+        edge_weight = normalize_matrix_batch(edge_weight)
+        edge_weight = edge_weight.reshape(-1)
+        x = self.bn1(x.transpose(1, 2)).transpose(1, 2)
+        x = x.reshape(-1, x.shape[-1])
+        x = self.conv1(x, edge_idx, edge_weight)
+        x = x.view((batch_size, -1))
+        x = x.reshape(batch_size, self.num_nodes, -1)
         return x
 
 

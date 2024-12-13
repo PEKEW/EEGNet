@@ -227,6 +227,12 @@ def normalize_matrix(m: torch.Tensor, symmetry: bool = True) -> torch.Tensor:
     # D^(-1/2) A D^(-1/2)
     return torch.matmul(torch.matmul(d, m), d)
 
+def normalize_matrix_batch(m: torch.Tensor, symmetry: bool = True) -> torch.Tensor:
+    batch_size = m.shape[0]
+    for i in range(batch_size):
+        m[i] = normalize_matrix(m[i], symmetry)
+    return m
+
 
 def l1_reg_loss(model: torch.nn.Module, only: Optional[List[str]] = None, exclude: Optional[List[str]] = None) -> torch.Tensor:
 

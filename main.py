@@ -1,3 +1,5 @@
+import torch.nn as nn
+from models.Dtf import DTF
 from models.CNNVAE import get_cnn_model
 from models.DGCNN import get_gnn_model
 from Datasets.DataloaderUtils import get_data_loader_cnn, \
@@ -14,41 +16,56 @@ from typing import Tuple, Optional, Dict
 
 
 # TODO: improve trans this func to models.All
-def _get_edge_weight(args):
+def get_pretrained_info(args) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    get pertrained edge expr and node expr
+    edge expr: 30, 30
+    node expr: 30, 250
+    """
     try:
         w = torch.load(f"{args.model_save_path}/model_group_1.pth")
-        edge_weight = w.state_dict()['edge_weight']
+        pretrain_edge_expr = w.state_dict()['edge_weight']
+        pretrain_node_expr = w.state_dict()['node_embedding']
         edge_idx = w.state_dict()['edge_idx']
     except Exception:
-        print("fail to load pretrained model")
-        _, edge_idx, edge_weight = get_edge_weight()
-    return edge_weight, edge_idx
+        print("fail to load pretrained model, use random initialization")
+        _, edge_idx, pretrain_edge_expr = get_edge_weight()
+        pretrain_node_expr = nn.Parameter(
+            torch.randn(30, 250).float(), requires_grad=True)
+    # ensure requires_grad
+    if not pretrain_edge_expr.requires_grad:
+        pretrain_edge_expr.requires_grad = True
+    if not pretrain_node_expr.requires_grad:
+        pretrain_node_expr.requires_grad = True
+    return pretrain_edge_expr, edge_idx, pretrain_node_expr
 
 
 def get_dtf(args):
     # TODO: important return diffusion module
-    from models.Dtf import DTF
     dft = DTF(args)
     try:
         dft.load_state_dict(torch.load(args.dtf_path))
     except Exception:
-        print("fail to load depersonal model")
+        print("warring: DTF not be trained yet or trained model not found")
     return dft
 
 
 def get_mcdis_model(args):
-    edge_weight, edge_idx = _get_edge_weight(args)
+    pretrain_edge_expr, edge_idx, pretrain_node_expr = get_pretrained_info(
+        args)
+    dtf = get_dtf(args)
     return MCDIS(
         args=args,
-        edge_weight=edge_weight,
+        edge_weight=pretrain_edge_expr,
+        node_weight=pretrain_node_expr,
         edge_idx=edge_idx,
-        Dtf=get_dtf(args)
+        Dtf=dtf
     )
 
 
 def train_cnn_vae(device: torch.device, args: Utils.Config.Args):
     train_loader, test_loader = get_data_loader_cnn(args)
-    trainer:Trainer.CNNTrainer = Trainer.get_video_trainer(args)
+    trainer: Trainer.CNNTrainer = Trainer.get_video_trainer(args)
     trainer._set_data_loader(train_loader)
     model = get_cnn_model().to(device)
     trainer._set_model(model)
@@ -64,36 +81,41 @@ def train_cnn_vae(device: torch.device, args: Utils.Config.Args):
     metric = tester._test_with_video()
     print(f"Test: {metric}")
 
+
 def setup_and_train_model(group1, group2, args, device):
     def setup_trainer(loader, args):
         trainer = Trainer.get_gnn_trainer(args)
         trainer._set_data_loader(loader)
-        model = get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device)
+        model = get_gnn_model(args, trainer.edge_weight,
+                              trainer.edge_index).to(device)
         trainer._set_model(model)
         trainer.init_optimizer()
         return trainer
-    
+
     trainers = [setup_trainer(loader, args) for loader in [group1[0]]]
-    
+
     # Training
     for epoch in range(args.gnn_num_epochs):
-        metrics = [trainer._train_with_eeg(args, epoch) for trainer in trainers]
-    
+        metrics = [trainer._train_with_eeg(
+            args, epoch) for trainer in trainers]
+
     # Testing
     test_metrics = []
     for trainer, test_loader in zip(trainers, [group1[1], group2[1]]):
         tester = Trainer.get_gnn_trainer(args)
         tester._set_data_loader(test_loader)
-        tester._set_model(get_gnn_model(args, trainer.edge_weight, trainer.edge_index).to(device))
+        tester._set_model(get_gnn_model(
+            args, trainer.edge_weight, trainer.edge_index).to(device))
         metric = tester._test_with_eeg()
         test_metrics.append(metric)
-    
+
     return test_metrics
 
 
 def update_model_paras(args, params):
     # TODO: important is needs search params, fix this
     raise NotImplementedError
+
 
 def train_normalize_eeg_gnn(device: torch.device, args: Utils.Config.Args) -> Tuple[float, Optional[Dict]]:
     datasets = VRSicknessDataset(root_dir=args.root_dir, mod=['eeg'])
@@ -104,32 +126,35 @@ def train_normalize_eeg_gnn(device: torch.device, args: Utils.Config.Args) -> Tu
         train_loaders = get_data_loaders_eeg_no_group(args)
         group1, group2 = train_loaders[:2], train_loaders[2:]
         test_metrics = setup_and_train_model(group1, group2, args, device)
-        
+
         for i, metric in enumerate(test_metrics, 1):
             print(f"Group{i} Test: {metric}")
     else:
         parameter_combinations = args.init_range_gnn()
-        print("="* 50, "Searching")
+        print("=" * 50, "Searching")
         for params in parameter_combinations:
             print(f"Testing parameters: {params}")
             update_model_paras(args, params)
             try:
                 train_loaders = get_data_loaders_eeg_no_group(args)
                 group1, group2 = train_loaders[:2], train_loaders[2:]
-                test_metrics = setup_and_train_model(group1, group2, args, device)
-                
+                test_metrics = setup_and_train_model(
+                    group1, group2, args, device)
+
                 if test_metrics[0]['accuracy'] > best_accuracy:
                     best_accuracy = test_metrics[0]['accuracy']
                     best_parameters = params
-                    
+
                 print(f"Accuracy: {test_metrics[0]['accuracy']}")
             except Exception as e:
-                print(f"Error during training with parameters {params}: {str(e)}")
+                print(f"Error during training with parameters {
+                      params}: {str(e)}")
                 continue
-                
+
         print("=" * 50)
-        print(f"Best Parameters: {best_parameters}, Best Accuracy: {best_accuracy}")
-    
+        print(f"Best Parameters: {
+              best_parameters}, Best Accuracy: {best_accuracy}")
+
     return best_accuracy, best_parameters
 
 
@@ -141,7 +166,7 @@ def train(args):
         trainer = Trainer.get_eeg_trainer(args)
         trainer._set_data_loader(loader)
         model = get_gnn_model(args, trainer.edge_weight,
-                            trainer.edge_index).to(device)
+                              trainer.edge_index).to(device)
         trainer._set_model(model)
         trainer.init_optimizer()
         return trainer
@@ -172,7 +197,7 @@ def train(args):
 
         trainers = [setup_trainer(loader, args)
                     for loader in [group1[0], group2[0]]
-                ]
+                    ]
 
         for epoch in range(args.num_epochs):
             print(f"Epoch {epoch}")
@@ -188,7 +213,8 @@ def train(args):
             tester = Trainer.get_eeg_trainer(args)
             tester._set_data_loader(test_loader)
             tester._set_model(trainer.get_model())
-            torch.save(trainer.get_model().state_dict(), f"{args.model_save_path}/model_group_{i}.pth")
+            torch.save(trainer.get_model().state_dict(), f"{
+                       args.model_save_path}/model_group_{i}.pth")
             metric = tester._test_with_eeg()
             test_metrics.append(metric)
             print(f"Group{i} Test: {metric}")

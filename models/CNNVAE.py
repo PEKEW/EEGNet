@@ -7,7 +7,7 @@ import itertools
 
 
 class BaseAttention(nn.Module):
-    def __init__(self, in_dim, out_dim, hidden_dim = 64):
+    def __init__(self, in_dim, out_dim, hidden_dim=64):
         super().__init__()
         if hidden_dim is None:
             hidden_dim = (in_dim + out_dim) // 2
@@ -17,41 +17,46 @@ class BaseAttention(nn.Module):
         self.scale = hidden_dim ** 0.5
         # TODO: important move to args
         self.dropout = nn.Dropout(0.5)
+
     def forward(self, x):
         q = self.q(x).unsqueeze(1)
         k = self.k(x).unsqueeze(1)
         v = self.v(x).unsqueeze(1)
         att_scores = torch.matmul(q, k.transpose(-2, -1)) / self.scale
-        att_weight = F.softmax(att_scores, dim=-1) 
+        att_weight = F.softmax(att_scores, dim=-1)
         att_weight = self.dropout(att_weight)
-        out = torch.matmul(att_weight, v) 
+        out = torch.matmul(att_weight, v)
         return out.squeeze(1)
+
 
 class OpticalNodeAttention(BaseAttention):
     def __init__(self, in_dim=1024, out_dim=10):
         super().__init__(in_dim=in_dim, out_dim=out_dim, hidden_dim=512)
 
+
 class OpticalEdgeAttention(BaseAttention):
     def __init__(self, in_dim=1024, out_dim=55):
         super().__init__(in_dim=in_dim, out_dim=out_dim, hidden_dim=512)
 
+
 class LogNodeAttention(BaseAttention):
     def __init__(self, in_dim=9, out_dim=12):
         super().__init__(in_dim=in_dim, out_dim=out_dim)
-        
+
+
 class LogEdgeAttention(BaseAttention):
     def __init__(self, in_dim=9, out_dim=55):
         super().__init__(in_dim=in_dim, out_dim=out_dim)
-        
 
-        
 
 class CNNEncoder(nn.Module):
     def __init__(self, args):
         super(CNNEncoder, self).__init__()
         self.conv1 = nn.Conv2d(3, args.channels1, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(args.channels1, args.channels2, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(args.channels2, args.channels3, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(
+            args.channels1, args.channels2, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(
+            args.channels2, args.channels3, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
         self.batch_norm1 = nn.BatchNorm2d(args.channels1)
         self.batch_norm2 = nn.BatchNorm2d(args.channels2)
@@ -96,7 +101,8 @@ class BAE(nn.Module):
         """
         node_dim = 30
         self.input_dim = input_dim
-        self.log_dim = 9 # time, speed, acceleration, rotation_speed, is_sickness, complete_sickness, pos[0], pos[1], pos[2]
+        # time, speed, acceleration, rotation_speed, is_sickness, complete_sickness, pos[0], pos[1], pos[2]
+        self.log_dim = 9
         self.hidden_size = args.bae_hidden_size
         self.latent_dim = args.bae_latent_size
         self.num_features = args.num_features
@@ -132,10 +138,14 @@ class BAE(nn.Module):
         self.log_edges = [
             (i, j) for i, j in itertools.product(self.log_nodes, self.log_nodes) if i <= j
         ]
-        self.optical_node_attention = OpticalNodeAttention(in_dim=self.input_dim, out_dim=len(self.optical_nodes))
-        self.optical_edge_attention = OpticalEdgeAttention(in_dim=self.input_dim, out_dim=len(self.optical_edges))
-        self.log_node_attention = LogNodeAttention(in_dim=self.log_dim, out_dim=len(self.log_nodes))
-        self.log_edge_attention = LogEdgeAttention(in_dim=self.log_dim, out_dim=len(self.log_edges))
+        self.optical_node_attention = OpticalNodeAttention(
+            in_dim=self.input_dim, out_dim=len(self.optical_nodes))
+        self.optical_edge_attention = OpticalEdgeAttention(
+            in_dim=self.input_dim, out_dim=len(self.optical_edges))
+        self.log_node_attention = LogNodeAttention(
+            in_dim=self.log_dim, out_dim=len(self.log_nodes))
+        self.log_edge_attention = LogEdgeAttention(
+            in_dim=self.log_dim, out_dim=len(self.log_edges))
 
     # TODO: important +  or *？
     def apply_attention(self, node_repr, edge_repr, attended_node, attended_edge, edge_list, node_list):
@@ -148,7 +158,7 @@ class BAE(nn.Module):
         enhanced_edge_repr = edge_repr.clone()
         for idx, edge in enumerate(edge_list):
             enhanced_edge_repr[:, edge[0], edge[1]] = \
-                ((edge_repr[:, edge[0], edge[1]].view(-1, 1)) + \
+                ((edge_repr[:, edge[0], edge[1]].view(-1, 1)) +
                     (attended_edge[:, idx].unsqueeze(1))).view(-1)
 
         return enhanced_node_repr, enhanced_edge_repr
@@ -187,14 +197,12 @@ class BAE(nn.Module):
         attended_log_edge = self.log_edge_attention(log_mean)
         node_repr, edge_repr = self.apply_attention(
             node_repr, edge_repr, attended_log_node, attended_log_edge, self.log_edges, self.log_nodes)
-
         return edge_repr, node_repr, mu, logvar
-
 
 
 class OutterBAE(nn.Module):
     def __init__(self, input_size=(64, 64), node_dim=30, num_features=Args.num_features,
-                latent_dim=90, dropout_rate=0.5, weight_decay=1e-5):
+                 latent_dim=90, dropout_rate=0.5, weight_decay=1e-5):
         super(OutterBAE, self).__init__()
 
         self.args = Args()
@@ -258,11 +266,10 @@ class OutterBAE(nn.Module):
             nn.Linear(32, 2)
         )
 
-
         self.apply(self._init_weights)
 
     def log_processor(self, x):
-        # TODO: important  
+        # TODO: important
         return x
 
     def _init_weights(self, m):
@@ -281,6 +288,7 @@ class OutterBAE(nn.Module):
         log = self.log_processor(log)
         edge_repr, node_repr, *_ = self.bae(original, optical, log)
         return edge_repr, node_repr
+
 
 def get_cnn_model():
     return OutterBAE(

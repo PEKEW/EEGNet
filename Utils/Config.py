@@ -17,7 +17,7 @@ class Args:
         self.train_fold = 'all'
         self.subjects_type = 'inter'
         self.valid_method = 'kfold'
-        self.search = False 
+        self.search = False
         self.cpu = not torch.cuda.is_available()
         self.early_stop = 20
         self.band = 30
@@ -85,6 +85,10 @@ class Args:
         self.delta = 1
         self.batch_size_all = 16
         self.clip_norm_all = 5
+
+        self.nce_edge_lr = 1e-3
+        self.nce_node_lr = 1e-3
+        self.nce_gnn_lr = 1e-3
 
     def init_range_gnn(self):
         self.node_learnable_list = [True, False]

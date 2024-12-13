@@ -57,10 +57,9 @@ class DTF(nn.Module):
     def forward(self, x):
         noise_level = self.get_noise_level(x)
         features = self.encoder(x)
-        
         noise_embed = self.embed(noise_level)
         noise_embed = noise_embed.view(-1, self.embed_dim, 1, 1)
-        noise_embed = noise_embed(-1, -1, features.shape[2], features.shape[3])
+        noise_embed = noise_embed.expand(-1, self.embed_dim, features.shape[2], features.shape[3])
         combined = torch.cat([features, noise_embed], dim=1)
         return self.decoder(combined)
 
