@@ -389,66 +389,67 @@ class MCDISTrainer(Trainer):
             dropout=dropout,
             device=device)
 
+
     def _train(self, args, epoch_num):
-        self.model = self.model.train()
-        # c_loss : graph of video and eeg contrast loss
-        # e_loss : entropy loss (class)
-        # r_loss : BAE loss (VAE)
-        # total_loss = c + e + r
+        self.model.train()
         epoch_loss = {
-            'total_loss': 0,
-            'contrast_loss': 0,
-            'entropy_loss': 0,
-            'rebuild_loss': 0,
+            'total_loss': 0.0,
+            'contrast_loss': 0.0,
+            'entropy_loss': 0.0,
+            'rebuild_loss': 0.0,
         }
         total_samples = 0
-        epoch_metrics = {}
         num_correct_predict = 0
-        total_class_predictions = []
 
         for batch in self.data_loader:
             self.optimizer.zero_grad()
             eeg_data = batch['eeg'].to(self.device, non_blocking=True)
-            original_data = batch['original'].to(
-                self.device, non_blocking=True)
+            original_data = batch['original'].to(self.device, non_blocking=True)
             optical_data = batch['optical'].to(self.device, non_blocking=True)
             motion_data = batch['motion'].to(self.device, non_blocking=True)
+            label = batch['label'].to(self.device, non_blocking=True).squeeze(1).long()
 
-            label = batch['label'].to(
-                self.device, non_blocking=True).squeeze(1).long()
+            output, personal_graph, video_graph, depersonal_graph = self.model(
+                eeg_data, original_data, optical_data, motion_data
+            )
 
-            output, personal_graph, video_graph, depersonal_graph = self.model(eeg_data, original_data,
-                                                                            optical_data, motion_data)
-
-            _loss = self.model.loss(
-                personal_graph, video_graph, depersonal_graph, output, label)
+            _loss = self.model.loss(personal_graph, video_graph, depersonal_graph, output, label)
             total_loss = _loss['total_loss']
-            constrast_loss = _loss['constrast_loss']
-            entropy_loss = _loss['cross_loss']
+            contrast_loss = _loss['contrast_loss']
+            cross_loss = _loss['cross_loss']
             rebuild_loss = _loss['rebuild_loss']
+
             # TODO: important where cal the reg items?
+            # TODO: important different loss use different optimizer optimize different params
             total_loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), max_norm=args.clip_norm)
-
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=args.clip_norm)
             self.optimizer.step()
 
             with torch.no_grad():
-                total_samples += eeg_data.size(0)
-                epoch_loss['contrast_loss'] += constrast_loss.item()
-                epoch_loss['entropy_loss'] += entropy_loss.item()
-                epoch_loss['rebuild_loss'] += rebuild_loss.item()
-                epoch_loss['total_loss'] += total_loss.item()
-            epoch_metrics['epoch'] = epoch_num
-            epoch_metrics['loss'] = [
-                (k, v / (total_samples / self.batch_size)) for k, v in epoch_loss
-            ]
-            epoch_loss['total_loss'] = epoch_loss['total_loss'] / (total_samples/self.batch_size)
-            epoch_metrics['num_correct'] = num_correct_predict
-            epoch_metrics['acc'] = num_correct_predict / total_samples
+                batch_size = eeg_data.size(0)
+                total_samples += batch_size
+                epoch_loss['total_loss'] += total_loss.item() * batch_size
+                epoch_loss['contrast_loss'] += contrast_loss.item() * batch_size
+                epoch_loss['entropy_loss'] += cross_loss.item() * batch_size
+                epoch_loss['rebuild_loss'] += rebuild_loss.item() * batch_size
+
+                pred = torch.argmax(output, dim=1)
+                num_correct_predict += (pred == label).sum().item()
+
+        epoch_loss = {k: v / total_samples for k, v in epoch_loss.items()}
+        acc = num_correct_predict / total_samples if total_samples > 0 else 0.0
+
+        epoch_metrics = {
+            'epoch': epoch_num,
+            'loss': list(epoch_loss.items()),
+            'num_correct': num_correct_predict,
+            'acc': acc
+        }
+
+        return epoch_metrics
     
     def _test(self, args):
+        # TODO: important
         pass
 def get_video_trainer(args) -> CNNTrainer:
     return CNNTrainer(

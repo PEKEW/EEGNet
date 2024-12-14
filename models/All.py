@@ -58,15 +58,15 @@ class MCDIS(nn.Module):
         # video graph: ((e), (n)), e: 16, 30, 30; n: 16, 30, 250
         video_graph = self.bae(video, flow, log)
         edge_expr, node_expr = video_graph
-        video_graph_gnn_out = self.gnn.forward_embedding_with_info(
+        video_graph_gnn_out = self.gnn.forward_embedding_with_batch(
             x=eeg,
             edge_weight=edge_expr,
-            node_weight=node_expr)
+            node_embedding=node_expr)
         # personal graph by gnn: 16, 30, 64(hidden)
-        personal_graph_gnn_out = self.gnn.forward_embedding_with_info(
+        personal_graph_gnn_out = self.gnn.forward_embedding_with_batch(
             x=eeg,
             edge_weight=self.pretrain_edge,
-            node_weight=self.pretrain_node)
+            node_embedding=self.pretrain_node)
         combined_feature = torch.cat(
             [personal_graph_gnn_out, video_graph_gnn_out], dim=2)
         combined_feature, _ = torch.max(combined_feature, dim=1)
@@ -76,10 +76,10 @@ class MCDIS(nn.Module):
         return out, personal_graph_gnn_out, video_graph_gnn_out, depersonal_graph
 
     def get_optimizer_nce(self):
-        return torch.optim.Adam(
+        return torch.optim.Adam([
             {'pretrain_edge': self.pretrain_edge, 'lr': self.args.nce_edge_lr},
-            {'pretrain_node': self.pretrain_node, 'lr': self.args.nce_edge_lr},
-            {'gnn': self.gnn.parameters(), 'lr': self.args.nce_gnn_lr},
+            {'pretrain_node': self.pretrain_node, 'lr': self.args.nce_node_lr},
+            {'gnn': self.gnn.parameters(), 'lr': self.args.nce_gnn_lr}]
         )
 
     def _info_nce_loss(self, personal_graph, video_graph):
@@ -87,6 +87,9 @@ class MCDIS(nn.Module):
         temp = self.args.temperature
         eeg = F.normalize(personal_graph, dim=1)
         video = F.normalize(video_graph, dim=1)
+        eeg = eeg.mean(dim=1)
+        video = video.mean(dim=1)
+        
         logits = torch.matmul(eeg, video.t()) / temp
         batch_size = eeg.shape[0]
         labels = torch.arange(batch_size, device=logits.device)
@@ -125,7 +128,7 @@ class MCDIS(nn.Module):
         return loss
 
     def loss(self, personal_graph, video_graph,
-             depersonal_graph, prediction, labels, name='total'):
+        depersonal_graph, prediction, labels, name='total'):
         # TODO: important where should cal the mmd reg?
         w_nce_loss = self.args.alpha
         w_reconstruction_loss = self.args.gamma
@@ -139,7 +142,7 @@ class MCDIS(nn.Module):
             w_class_loss * class_loss
         return {
             'total_loss': total_loss,
-            'constrast_loss': nce_loss,
+            'contrast_loss': nce_loss,
             'cross_loss': class_loss,
             'rebuild_loss': reconstruction_loss,
         }

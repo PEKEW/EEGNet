@@ -15,6 +15,9 @@ class Embedding(nn.Module):
 
 
 class DTF(nn.Module):
+    # INFO: 
+    # input : original EEG (30, 250)
+    # output: depersonalized graph representation (30, 30)
     def __init__(self, args):
         super(DTF, self).__init__()
         self.args = args
@@ -55,6 +58,11 @@ class DTF(nn.Module):
         return noise_level
 
     def forward(self, x):
+        # TODO: important (30, 250) -> (30, 30)
+        # TODO: important make it!
+        # TODO: important before make it, just return fake output
+        return torch.zeros(16, 1, 30, 30).to('cuda')
+        
         noise_level = self.get_noise_level(x)
         features = self.encoder(x)
         noise_embed = self.embed(noise_level)
@@ -93,7 +101,7 @@ def train(model, graph_list, optimizer, num_epochs):
 
 
 
-# TODO: important 预训练一个dft
+# TODO: important dft must be pretrained by using
 def main():
     args = Config.Args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

@@ -16,7 +16,7 @@ from typing import Tuple, Optional, Dict
 
 
 # TODO: improve trans this func to models.All
-def get_pretrained_info(args) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def get_pretrained_info(args) -> Tuple[torch.Tensor, List[List[int]], torch.Tensor]:
     """
     get pertrained edge expr and node expr
     edge expr: 30, 30
@@ -30,6 +30,8 @@ def get_pretrained_info(args) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     except Exception:
         print("fail to load pretrained model, use random initialization")
         _, edge_idx, pretrain_edge_expr = get_edge_weight()
+        pretrain_edge_expr = nn.Parameter(torch.Tensor(
+            pretrain_edge_expr).float(), requires_grad=True)
         pretrain_node_expr = nn.Parameter(
             torch.randn(30, 250).float(), requires_grad=True)
     # ensure requires_grad
@@ -37,6 +39,9 @@ def get_pretrained_info(args) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
         pretrain_edge_expr.requires_grad = True
     if not pretrain_node_expr.requires_grad:
         pretrain_node_expr.requires_grad = True
+    device = torch.device('cuda' if not args.cpu else 'cpu')
+    pretrain_edge_expr = pretrain_edge_expr.to(device)
+    pretrain_node_expr = pretrain_node_expr.to(device)
     return pretrain_edge_expr, edge_idx, pretrain_node_expr
 
 
@@ -59,7 +64,7 @@ def get_mcdis_model(args):
         edge_weight=pretrain_edge_expr,
         node_weight=pretrain_node_expr,
         edge_idx=edge_idx,
-        Dtf=dtf
+        dtf=dtf
     )
 
 
@@ -147,13 +152,11 @@ def train_normalize_eeg_gnn(device: torch.device, args: Utils.Config.Args) -> Tu
 
                 print(f"Accuracy: {test_metrics[0]['accuracy']}")
             except Exception as e:
-                print(f"Error during training with parameters {
-                      params}: {str(e)}")
+                print(f"Error during training with parameters {params}: {str(e)}")
                 continue
 
         print("=" * 50)
-        print(f"Best Parameters: {
-              best_parameters}, Best Accuracy: {best_accuracy}")
+        print(f"Best Parameters: {best_parameters}, Best Accuracy: {best_accuracy}")
 
     return best_accuracy, best_parameters
 
@@ -213,8 +216,7 @@ def train(args):
             tester = Trainer.get_eeg_trainer(args)
             tester._set_data_loader(test_loader)
             tester._set_model(trainer.get_model())
-            torch.save(trainer.get_model().state_dict(), f"{
-                       args.model_save_path}/model_group_{i}.pth")
+            torch.save(trainer.get_model().state_dict(), f"{args.model_save_path}/model_group_{i}.pth")
             metric = tester._test_with_eeg()
             test_metrics.append(metric)
             print(f"Group{i} Test: {metric}")
