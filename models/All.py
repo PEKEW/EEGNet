@@ -3,7 +3,6 @@ import torch.nn as nn
 from models.CNNVAE import OutterBAE
 from models.DGCNN import DGCNN
 import torch.nn.functional as F
-from models.Dtf import DTF
 
 """
 DTF: Depersonalized Transfer Field
@@ -32,10 +31,10 @@ class MCDIS(nn.Module):
         self.pretrain_node = node_weight
         self.edge_idx = edge_idx
         self.gnn = DGCNN(edge_weight, edge_idx,
-                         num_hiddens=args.gnn_hiddens_size,
-                         num_layers=args.gnn_num_layers,
-                         dropout=args.gnn_dropout,
-                         node_learnable=args.node_learnable)
+                        num_hiddens=args.gnn_hiddens_size,
+                        num_layers=args.gnn_num_layers,
+                        dropout=args.gnn_dropout,
+                        node_learnable=args.node_learnable)
         self.dtf = dtf
         self.mlp_input_size = 128  # two 64-dim feature combined
         # TODO: improve make hard code to args
@@ -82,8 +81,8 @@ class MCDIS(nn.Module):
             {'gnn': self.gnn.parameters(), 'lr': self.args.nce_gnn_lr}]
         )
 
-    def _info_nce_loss(self, personal_graph, video_graph):
-        """ contrastive loss """
+    def _contrastive_loss(self, personal_graph, video_graph):
+        """ contrastive loss NCE"""
         temp = self.args.temperature
         eeg = F.normalize(personal_graph, dim=1)
         video = F.normalize(video_graph, dim=1)
@@ -130,19 +129,19 @@ class MCDIS(nn.Module):
     def loss(self, personal_graph, video_graph,
         depersonal_graph, prediction, labels, name='total'):
         # TODO: important where should cal the mmd reg?
-        w_nce_loss = self.args.alpha
+        w_contrast_loss = self.args.alpha
         w_reconstruction_loss = self.args.gamma
         w_class_loss = self.args.delta
-        nce_loss = self._info_nce_loss(personal_graph, video_graph)
+        contrast_loss = self._contrastive_loss(personal_graph, video_graph)
         reconstruction_loss = self._reconstruction_loss(
             video_graph, personal_graph)
         class_loss = self._class_loss(prediction, labels)
-        total_loss = w_nce_loss * nce_loss +  \
+        total_loss = w_contrast_loss * contrast_loss +  \
             w_reconstruction_loss * reconstruction_loss + \
             w_class_loss * class_loss
         return {
             'total_loss': total_loss,
-            'contrast_loss': nce_loss,
-            'cross_loss': class_loss,
+            'contrast_loss': contrast_loss,
+            'class_loss': class_loss,
             'rebuild_loss': reconstruction_loss,
         }

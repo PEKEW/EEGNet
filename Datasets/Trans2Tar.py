@@ -1,4 +1,4 @@
-# todo resize to 256*256
+# INFO: resize to 256*256
 
 import os
 from pathlib import Path

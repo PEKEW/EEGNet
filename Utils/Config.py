@@ -8,7 +8,7 @@ class Args:
     num_features = 250
     rand_seed = 42
     group = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH',
-             'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
+            'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
 
     # TODO: important: declear all hyperparameters with different part
     def __init__(self):
@@ -57,7 +57,7 @@ class Args:
         self.node_learnable = True
         self.gnn_hidden_size = 32
         self.gnn_dropout = 0.5
-        self.data_sampler_strategy = 'down'
+        self.data_sampler_strategy = 'up'
         self.optimizer = 'Adam'
         self.channels1 = 16
         self.channels2 = 32
@@ -79,9 +79,9 @@ class Args:
         self.temperature = 0.05
         self.num_heads = 8
         self.atn_hidden_dim = 256
-        self.alpha = 1
-        self.beta = 1
-        self.gamma = 1
+        self.alpha = 0
+        self.beta = 0
+        self.gamma = 0
         self.delta = 1
         self.batch_size_all = 16
         self.clip_norm_all = 5
@@ -89,7 +89,10 @@ class Args:
         self.nce_edge_lr = 1e-3
         self.nce_node_lr = 1e-3
         self.nce_gnn_lr = 1e-3
-
+        
+        self.dtf_path='/home/pekew/code/EEGNet/results/models/dtf.pth'
+        self.bae_att_dropout = 0.5
+        
     def init_range_gnn(self):
         self.node_learnable_list = [True, False]
         self.eeg_hidden_size_list = [16, 32, 64, 128]

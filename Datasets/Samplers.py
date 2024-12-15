@@ -6,7 +6,7 @@ from Utils.Config import Args
 
 class RandomSampler(Sampler):
     init_list = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW',
-                 'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
+            'LMH', 'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
 
     def __init__(self, dataset, strategy='down', group1=None, group2=None, mod='train', group_id=0):
         """随机对被试采样
@@ -55,7 +55,7 @@ class RandomSampler(Sampler):
         self.indices = positive_indices + negative_indices
         random.shuffle(self.indices)
         balanced_labels = [dataset.labels[dataset.samples[i][0]]
-                           [f"slice_{dataset.samples[i][1]}"] for i in self.indices]
+                        [f"slice_{dataset.samples[i][1]}"] for i in self.indices]
 
         train_indices, test_indices = train_test_split(
             self.indices,
@@ -75,7 +75,7 @@ class RandomSampler(Sampler):
         return len(self.train_indices) if self.mod == 'train' else len(self.test_indices)
 
 
-# todo trans sampler class 2 new sampler file
+# TODO: improve trans sampler class 2 new sampler file
 
 class GenderSubjectSampler(Sampler):
     male_sub_list = ['TYR', 'XSJ', 'CM', 'SHQ', 'LMH', 'LZX', 'LJ', 'WZT']

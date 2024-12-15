@@ -7,7 +7,7 @@ import itertools
 
 
 class BaseAttention(nn.Module):
-    def __init__(self, in_dim, out_dim, hidden_dim=64):
+    def __init__(self, in_dim, out_dim, hidden_dim=64, dropout=0.5):
         super().__init__()
         if hidden_dim is None:
             hidden_dim = (in_dim + out_dim) // 2
@@ -15,8 +15,7 @@ class BaseAttention(nn.Module):
         self.k = nn.Linear(in_dim, hidden_dim)
         self.v = nn.Linear(in_dim, out_dim)
         self.scale = hidden_dim ** 0.5
-        # TODO: important move to args
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         q = self.q(x).unsqueeze(1)
@@ -30,23 +29,23 @@ class BaseAttention(nn.Module):
 
 
 class OpticalNodeAttention(BaseAttention):
-    def __init__(self, in_dim=1024, out_dim=10):
-        super().__init__(in_dim=in_dim, out_dim=out_dim, hidden_dim=512)
+    def __init__(self, in_dim=1024, out_dim=10, dropout=0.5):
+        super().__init__(in_dim=in_dim, out_dim=out_dim, hidden_dim=512, dropout=dropout)
 
 
 class OpticalEdgeAttention(BaseAttention):
-    def __init__(self, in_dim=1024, out_dim=55):
-        super().__init__(in_dim=in_dim, out_dim=out_dim, hidden_dim=512)
+    def __init__(self, in_dim=1024, out_dim=55, dropout=0.5):
+        super().__init__(in_dim=in_dim, out_dim=out_dim, hidden_dim=512, dropout=dropout)
 
 
 class LogNodeAttention(BaseAttention):
-    def __init__(self, in_dim=9, out_dim=12):
-        super().__init__(in_dim=in_dim, out_dim=out_dim)
+    def __init__(self, in_dim=9, out_dim=12, dropout=0.5):
+        super().__init__(in_dim=in_dim, out_dim=out_dim, dropout=dropout)
 
 
 class LogEdgeAttention(BaseAttention):
-    def __init__(self, in_dim=9, out_dim=55):
-        super().__init__(in_dim=in_dim, out_dim=out_dim)
+    def __init__(self, in_dim=9, out_dim=55, dropout=0.5):
+        super().__init__(in_dim=in_dim, out_dim=out_dim, dropout=dropout)
 
 
 class CNNEncoder(nn.Module):
@@ -110,6 +109,7 @@ class BAE(nn.Module):
         self.node_dim = node_dim
         self.output_size = self.edge_dim + node_dim * args.num_features
         dp = args.bae_dropout
+        att_dp = args.bae_att_dropout
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, self.hidden_size),
             nn.ReLU(),
@@ -139,15 +139,14 @@ class BAE(nn.Module):
             (i, j) for i, j in itertools.product(self.log_nodes, self.log_nodes) if i <= j
         ]
         self.optical_node_attention = OpticalNodeAttention(
-            in_dim=self.input_dim, out_dim=len(self.optical_nodes))
+            in_dim=self.input_dim, out_dim=len(self.optical_nodes), dropout=att_dp)
         self.optical_edge_attention = OpticalEdgeAttention(
-            in_dim=self.input_dim, out_dim=len(self.optical_edges))
+            in_dim=self.input_dim, out_dim=len(self.optical_edges), dropout=att_dp)
         self.log_node_attention = LogNodeAttention(
-            in_dim=self.log_dim, out_dim=len(self.log_nodes))
+            in_dim=self.log_dim, out_dim=len(self.log_nodes), dropout=att_dp)
         self.log_edge_attention = LogEdgeAttention(
-            in_dim=self.log_dim, out_dim=len(self.log_edges))
+            in_dim=self.log_dim, out_dim=len(self.log_edges), dropout=att_dp)
 
-    # TODO: important +  or *？
     def apply_attention(self, node_repr, edge_repr, attended_node, attended_edge, edge_list, node_list):
         enhanced_node_repr = node_repr.clone()
         for idx, node in enumerate(node_list):
@@ -269,7 +268,6 @@ class OutterBAE(nn.Module):
         self.apply(self._init_weights)
 
     def log_processor(self, x):
-        # TODO: important
         return x
 
     def _init_weights(self, m):

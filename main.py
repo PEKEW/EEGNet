@@ -46,7 +46,6 @@ def get_pretrained_info(args) -> Tuple[torch.Tensor, List[List[int]], torch.Tens
 
 
 def get_dtf(args):
-    # TODO: important return diffusion module
     dft = DTF(args)
     try:
         dft.load_state_dict(torch.load(args.dtf_path))
@@ -92,7 +91,7 @@ def setup_and_train_model(group1, group2, args, device):
         trainer = Trainer.get_gnn_trainer(args)
         trainer._set_data_loader(loader)
         model = get_gnn_model(args, trainer.edge_weight,
-                              trainer.edge_index).to(device)
+                            trainer.edge_index).to(device)
         trainer._set_model(model)
         trainer.init_optimizer()
         return trainer
@@ -104,7 +103,6 @@ def setup_and_train_model(group1, group2, args, device):
         metrics = [trainer._train_with_eeg(
             args, epoch) for trainer in trainers]
 
-    # Testing
     test_metrics = []
     for trainer, test_loader in zip(trainers, [group1[1], group2[1]]):
         tester = Trainer.get_gnn_trainer(args)
@@ -118,7 +116,6 @@ def setup_and_train_model(group1, group2, args, device):
 
 
 def update_model_paras(args, params):
-    # TODO: important is needs search params, fix this
     raise NotImplementedError
 
 
@@ -239,7 +236,7 @@ def train(args):
         tester = Trainer.get_all_trainer(args)
         tester._set_data_loader(test_loader)
         tester._set_model(trainer.get_model())
-        metric = tester._test(args)
+        metric = tester._test()
         print(f"Test: {metric}")
 
 

@@ -78,8 +78,8 @@ class VRSicknessDataset(Dataset):
             valid_samples.extend((sub_id, slice_id) for slice_id in valid_slices)
                 
         # TODO: important cut samples for test
-        # return valid_samples
-        return valid_samples[0:500]
+        return valid_samples
+        # return valid_samples[0:500]
 
     def _load_frames(self, sub_id, slice_id):
         def get_frame_id(name: str) -> int:
@@ -196,6 +196,8 @@ class VRSicknessDataset(Dataset):
             if padding_features is None:
                 raise NotImplementedError(f"Unsupported padding mode: {padding_mod}")
             motion_features.extend([padding_features] * (30 - num_frames))
+        if num_frames > 30:
+            motion_features = motion_features[:30]
         return torch.FloatTensor(motion_features)
 
     def _load_label(self, sub_id, slice_id):

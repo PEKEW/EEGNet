@@ -3,8 +3,6 @@ from typing import Dict, List, Union
 from torch import Tensor
 FPS = 30-1
 
-
-# TODO: important there have to consider different length of sequence and different data type
 class SequenceCollator:
     def __init__(self,
                 sequence_length=None,

@@ -263,9 +263,6 @@ class DGCNNTrainer(Trainer):
                 ])
                 total_labels.extend([item for item in label])
 
-            epoch_metrics['num_correct'] = num_correct_predict
-            epoch_metrics['acc'] = num_correct_predict / total_samples
-
             y_true = np.array(total_labels)
             y_pred = np.array(total_class_predictions)
 
@@ -395,7 +392,7 @@ class MCDISTrainer(Trainer):
         epoch_loss = {
             'total_loss': 0.0,
             'contrast_loss': 0.0,
-            'entropy_loss': 0.0,
+            'class_loss': 0.0,
             'rebuild_loss': 0.0,
         }
         total_samples = 0
@@ -416,7 +413,7 @@ class MCDISTrainer(Trainer):
             _loss = self.model.loss(personal_graph, video_graph, depersonal_graph, output, label)
             total_loss = _loss['total_loss']
             contrast_loss = _loss['contrast_loss']
-            cross_loss = _loss['cross_loss']
+            class_loss = _loss['class_loss']
             rebuild_loss = _loss['rebuild_loss']
 
             # TODO: important where cal the reg items?
@@ -430,7 +427,7 @@ class MCDISTrainer(Trainer):
                 total_samples += batch_size
                 epoch_loss['total_loss'] += total_loss.item() * batch_size
                 epoch_loss['contrast_loss'] += contrast_loss.item() * batch_size
-                epoch_loss['entropy_loss'] += cross_loss.item() * batch_size
+                epoch_loss['class_loss'] += class_loss.item() * batch_size
                 epoch_loss['rebuild_loss'] += rebuild_loss.item() * batch_size
 
                 pred = torch.argmax(output, dim=1)
@@ -448,9 +445,54 @@ class MCDISTrainer(Trainer):
 
         return epoch_metrics
     
-    def _test(self, args):
-        # TODO: important
-        pass
+    def _test(self):
+        total_samples = 0
+        epoch_metrics = {}
+        num_correct_predict = 0
+        total_class_predictions = []
+        total_labels = []
+        
+        with torch.no_grad():
+            for batch in self.data_loader:
+                eeg_data = batch['eeg'].to(self.device, non_blocking=True)
+                original_data = batch['original'].to(self.device, non_blocking=True)
+                optical_data = batch['optical'].to(self.device, non_blocking=True)
+                motion_data = batch['motion'].to(self.device, non_blocking=True)
+                label = batch['label'].to(self.device, non_blocking=True).squeeze(1).long()
+
+                output, _, _, _ = self.model(eeg_data, original_data, optical_data, motion_data)
+                pred = torch.argmax(output, dim=1)
+                num_correct_predict += (pred == label).sum().item()
+
+                total_samples += eeg_data.size(0)
+                
+            epoch_metrics['num_correct'] = num_correct_predict
+            epoch_metrics['acc'] = num_correct_predict / total_samples
+            
+            y_true = np.array(total_labels)
+            y_pred = np.array(total_class_predictions)
+            
+            epoch_metrics['num_correct'] = num_correct_predict
+            epoch_metrics['acc'] = num_correct_predict / total_samples
+            epoch_metrics['f1_macro'] = f1_score(y_true, y_pred, average='macro')
+            epoch_metrics['f1_weighted'] = f1_score(y_true, y_pred, average='weighted')
+            epoch_metrics['precision_macro'] = precision_score(y_true, y_pred, average='macro')
+            epoch_metrics['recall_macro'] = recall_score(y_true, y_pred, average='macro')
+            
+            conf_matrix = confusion_matrix(y_true, y_pred)
+            num_classes = conf_matrix.shape[0]
+            
+            fprs = []
+            for i in range(num_classes):
+                fp = np.sum(conf_matrix[:, i]) - conf_matrix[i, i]
+                tn = np.sum(conf_matrix) - np.sum(conf_matrix[i, :]) - np.sum(conf_matrix[:, i]) + conf_matrix[i, i]
+                fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+                fprs.append(fpr)
+                
+            epoch_metrics['false_positive_rates'] = fprs
+            epoch_metrics['confusion_matrix'] = conf_matrix.tolist()
+        return epoch_metrics
+        
 def get_video_trainer(args) -> CNNTrainer:
     return CNNTrainer(
         num_classes=args.num_classes,

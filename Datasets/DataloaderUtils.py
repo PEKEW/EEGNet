@@ -112,13 +112,15 @@ def get_data_loader_all(args) -> Tuple[DataLoader, DataLoader]:
         dataset=datasets,
         mod='train',
         group1=group,
-        group2=[]
+        group2=[],
+        strategy=args.data_sampler_strategy
     )
     test_sampler = RandomSampler(
         dataset=datasets,
         mod='test',
         group1=group,
-        group2=[]
+        group2=[],
+        strategy=args.data_sampler_strategy
     )
     collate = SequenceCollator(
         sequence_length=None,
