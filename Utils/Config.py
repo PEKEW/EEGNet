@@ -5,94 +5,100 @@ import numpy as np
 
 
 class Args:
+    # TODO: improve IIII reduce num of hyperparameters
     num_features = 250
     rand_seed = 42
     group = ['TYR', 'XSJ', 'CM', 'TX', 'HZ', 'CYL', 'GKW', 'LMH',
-            'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
+             'WJX', 'CWG', 'SHQ', 'YHY', 'LZX', 'LJ', 'WZT', 'LZY']
 
-    # TODO: important: declear all hyperparameters with different part
     def __init__(self):
-
+        self.dash_path = 'runs/Test'
         self.root_dir = '/home/pekew/code/EEGNet/data'
+        self.model_save_path = '/home/pekew/code/EEGNet/results/models'
+        self.dtf_path = '/home/pekew/code/EEGNet/results/models/dtf.pth'
+        self.data_root_dir = None
+        self.model_path = None
+        self.model_mod = 'all'  # cnn | eeg_group | all
+
         self.train_fold = 'all'
         self.subjects_type = 'inter'
         self.valid_method = 'kfold'
-        self.search = False
         self.cpu = not torch.cuda.is_available()
-        self.early_stop = 20
-        self.band = 30
-        self.num_nodes = self.band
-        self.gnn_num_epochs = 20
-        self.cnn_num_epochs = 16
-        self.mcdis_num_epochs = 20
-        self.l1_reg = 0.001
-        self.l2_reg = 0.001
-        self.lr = 0.001
-        self.dropout = 0.5
-        self.num_layers = 2
-        self.n_vids = 24
-        self.model_save_path = '/home/pekew/code/EEGNet/results/models'
-        self.num_classes = 2
-        self.num_workers = 8
-        self.batch_size = 16
-        self.band = 30
-        self.num_nodes = self.band
-        self.num_epochs = 25
-        self.l1_reg = 0.0001
-        self.l2_reg = 0.0005
-        self.lr = 0.0003
-        self.gnn_hiddens_size = 64
-        self.gnn_num_layers = 3
-        self.clip_norm = 3
-        self.node_learnable = True
-        # self.mod = ['eeg']  #  eeg | optical | original | motion
-        self.model_mod = 'all'  # cnn | eeg_group | all
-        self.n_folds = None
-        self.n_per = None
-        self.sec = None
-        self.data_root_dir = None
-        self.now_time = None
-        self.model_path = None
-        self.sub_list = None
-        self.node_learnable = True
-        self.gnn_hidden_size = 32
-        self.gnn_dropout = 0.5
+        self.early_stop = 50
+        self.search = True
         self.data_sampler_strategy = 'up'
         self.optimizer = 'Adam'
-        self.channels1 = 16
-        self.channels2 = 32
-        self.channels3 = 64
-        self.embed_dim = 32
-        self.bae_dropout = 0.5
-        # TODO: improve edge is symmetric matrix reduce parameters
+
+        self.num_classes = 2
+        self.band = 30
+        self.num_nodes = self.band
+        self.num_heads = 8
+        self.node_learnable = True
+        
+        self.cnn_encoder_channels1 = 16
+        self.cnn_encoder_channels2 = 32
+        self.cnn_encoder_channels3 = 64
+        
+        self.diffusion_embed_dim = 32
         self.edge_hidden_size = 900
-        self.node_hidden_size = 250*30
-        self.search = True
-        self.epoch_diff = 100
-        self.diff_steps = 100
-        self.channels0 = 16
-        self.channels1 = 32
+        self.node_hidden_size = 250 * 30
+        self.atn_hidden_dim = 256
+
+        self.gnn_hidden_size = 32
+        self.gnn_hiddens_size = 64
+        self.gnn_num_layers = 3
+        self.gnn_dropout = 0.5
+
+        self.bae_dropout = 0.5
+        self.bae_att_dropout = 0.5
         self.bae_hidden_size = 512
         self.bae_latent_size = 64
         self.bae_latent_dim = 90
-        self.cnn_num_epochs = 50
-        self.temperature = 0.05
-        self.num_heads = 8
-        self.atn_hidden_dim = 256
-        self.alpha = 0
-        self.beta = 0
-        self.gamma = 0
-        self.delta = 1
-        self.batch_size_all = 16
-        self.clip_norm_all = 5
+        
+        self.mcdis_dropout = 0.5
+        self.mcdis_batch_size = 32
+        # TODO: important IIIII
+        # 0.0003
+        self.mcdis_lr = 0.0001
+        self.mcdis_num_epochs = 80
+        self.mcdis_mlp_dropout = 0.5
 
-        self.nce_edge_lr = 1e-3
-        self.nce_node_lr = 1e-3
-        self.nce_gnn_lr = 1e-3
+        self.batch_size = 16
+        self.num_workers = 8
+        self.num_epochs = 25
+        self.gnn_num_epochs = 20
+        self.cnn_num_epochs = 35
+        self.epoch_diff = 100
+        self.diff_steps = 100
         
-        self.dtf_path='/home/pekew/code/EEGNet/results/models/dtf.pth'
-        self.bae_att_dropout = 0.5
+        self.lr = 0.0003
+        self.contrastive_edge_lr = 1e-3
+        self.contrastive_node_lr = 1e-3
+        self.contrastive_gnn_lr = 1e-3
+        self.rebuild_lr = 1e-3
+
+        self.l1_reg = 0.0001 
+        self.l2_reg = 0.0005
+        self.rebuild_l1_reg = 1e-2
+        self.struct_reg = 0
+        self.clip_norm = 3
+        self.all_clip_norm = 5
+        self.temperature = 0.05
+        self.mmd_w = 1
+        self.struce_w = 1
         
+        self.n_vids = 24
+        self.alpha = 1
+        self.beta = 1
+        self.gamma = 1
+        self.delta = 1
+        
+        self.n_folds = None
+        self.n_per = None
+        self.sec = None
+        self.now_time = None
+        self.sub_list = None
+
     def init_range_gnn(self):
         self.node_learnable_list = [True, False]
         self.eeg_hidden_size_list = [16, 32, 64, 128]
@@ -155,11 +161,11 @@ class Args:
 
 def init():
     config = Args()
+    random.seed(config.rand_seed)
     torch.manual_seed(config.rand_seed)
     torch.cuda.manual_seed(config.rand_seed)
     torch.cuda.manual_seed_all(config.rand_seed)
     np.random.seed(config.rand_seed)
-    random.seed(config.rand_seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.cuda.synchronize()

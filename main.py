@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch.utils.tensorboard
 from models.Dtf import DTF
 from models.CNNVAE import get_cnn_model
 from models.DGCNN import get_gnn_model
@@ -13,7 +14,10 @@ import torch
 import Utils.Config
 from models.Utils import get_edge_weight
 from typing import Tuple, Optional, Dict
+from torch.utils.tensorboard.writer import SummaryWriter
 
+
+# TODO: improve remove all print | gradient
 
 # TODO: improve trans this func to models.All
 def get_pretrained_info(args) -> Tuple[torch.Tensor, List[List[int]], torch.Tensor]:
@@ -22,11 +26,17 @@ def get_pretrained_info(args) -> Tuple[torch.Tensor, List[List[int]], torch.Tens
     edge expr: 30, 30
     node expr: 30, 250
     """
+    def load(path):
+        w = torch.load(path, weights_only=True)
+        edge = nn.Parameter(w['edge_weight'].detach(), requires_grad=True)
+        node = nn.Parameter(w['node_embedding'].detach(), requires_grad=True)
+        idx = w.state_dict()['edge_idx']
+        return edge, node, idx
     try:
-        w = torch.load(f"{args.model_save_path}/model_group_1.pth")
-        pretrain_edge_expr = w.state_dict()['edge_weight']
-        pretrain_node_expr = w.state_dict()['node_embedding']
-        edge_idx = w.state_dict()['edge_idx']
+        pretrain_edge_expr_1, pretrain_node_expr_1, _ = load(f"{args.model_save_path}/model_group_1.pth")
+        pretrain_edge_expr_2, pretrain_node_expr_2, edge_idx = load(f"{args.model_save_path}/model_group_2.pth")
+        pretrain_edge_expr = (pretrain_edge_expr_1 + pretrain_edge_expr_2) * 0.5
+        pretrain_node_expr = (pretrain_node_expr_1 + pretrain_node_expr_2) * 0.5
     except Exception:
         print("fail to load pretrained model, use random initialization")
         _, edge_idx, pretrain_edge_expr = get_edge_weight()
@@ -34,7 +44,6 @@ def get_pretrained_info(args) -> Tuple[torch.Tensor, List[List[int]], torch.Tens
             pretrain_edge_expr).float(), requires_grad=True)
         pretrain_node_expr = nn.Parameter(
             torch.randn(30, 250).float(), requires_grad=True)
-    # ensure requires_grad
     if not pretrain_edge_expr.requires_grad:
         pretrain_edge_expr.requires_grad = True
     if not pretrain_node_expr.requires_grad:
@@ -48,7 +57,7 @@ def get_pretrained_info(args) -> Tuple[torch.Tensor, List[List[int]], torch.Tens
 def get_dtf(args):
     dft = DTF(args)
     try:
-        dft.load_state_dict(torch.load(args.dtf_path))
+        dft.load_state_dict(torch.load(args.dtf_path, weights_only=True))
     except Exception:
         print("warring: DTF not be trained yet or trained model not found")
     return dft
@@ -77,10 +86,10 @@ def train_cnn_vae(device: torch.device, args: Utils.Config.Args):
     for epoch in range(args.cnn_num_epochs):
         # print(f"Epoch {epoch}")
         metric = trainer._train_with_video(args, epoch)
-        # print(f"Train: {metric}")
-
     tester = Trainer.get_video_trainer(args)
     tester._set_data_loader(test_loader)
+        # print(f"Train: {metric}")
+
     tester._set_model(get_cnn_model().to(device))
     metric = tester._test_with_video()
     print(f"Test: {metric}")
@@ -158,7 +167,7 @@ def train_normalize_eeg_gnn(device: torch.device, args: Utils.Config.Args) -> Tu
     return best_accuracy, best_parameters
 
 
-def train(args):
+def train(args, writer):
     device = torch.device('cuda' if not args.cpu else 'cpu')
     print("=" * 50)
 
@@ -166,7 +175,7 @@ def train(args):
         trainer = Trainer.get_eeg_trainer(args)
         trainer._set_data_loader(loader)
         model = get_gnn_model(args, trainer.edge_weight,
-                              trainer.edge_index).to(device)
+                            trainer.edge_index).to(device)
         trainer._set_model(model)
         trainer.init_optimizer()
         return trainer
@@ -226,18 +235,29 @@ def train(args):
         trainer._set_data_loader(train_loader)
         model = get_mcdis_model(args).to(device)
         trainer._set_model(model)
-        trainer.init_optimizer()
-        for epoch in range(args.mcdis_num_epochs):
-            print(f"Epoch {epoch}")
-            metrics = trainer._train(args, epoch)
-            print(f"Train: {metrics}")
-        print("=" * 50)
-
+        trainer.init_optimizer(mulit_optimizer=True)
         tester = Trainer.get_all_trainer(args)
         tester._set_data_loader(test_loader)
+        for epoch in range(args.mcdis_num_epochs):
+            print(f"Epoch {epoch}")
+            metrics = trainer._train(args, epoch, writer)
+            writer.add_scalars('Loss/train', {
+                'ALoss': metrics['loss'][0][1],
+                'CoLoss': metrics['loss'][1][1],
+                'ClLoss': metrics['loss'][2][1],
+                'RLoss': metrics['loss'][3][1],
+            }, epoch)
+            print(f"Train: {metrics}")
+            writer.add_scalars('Acc', 
+                {"train":metrics['acc'], }, epoch)
+            # writer.add_scalars('Acc', 
+            #     {"train":metrics['acc'], 
+            #     "test": metric['acc']}, epoch)
+        print("=" * 50)
         tester._set_model(trainer.get_model())
         metric = tester._test()
         print(f"Test: {metric}")
+
 
 
 # TODO: improve trans these func to Utils
@@ -276,7 +296,8 @@ def depersonalization(args):
 
 
 def main(args):
-    train(args)
+    writer = SummaryWriter(log_dir = args.dash_path)
+    train(args, writer)
     # edge, node = depersonalization(args)
     # train_normalize_eeg_gnn(device, args)
 

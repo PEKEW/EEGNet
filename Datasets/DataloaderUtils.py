@@ -95,7 +95,7 @@ def get_data_loader_all(args) -> Tuple[DataLoader, DataLoader]:
     def create_loader(sampler, collate):
         return DataLoader(
             datasets,
-            batch_size=args.batch_size_all,
+            batch_size=args.mcdis_batch_size,
             sampler=sampler,
             num_workers=args.num_workers,
             collate_fn=collate,

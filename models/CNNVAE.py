@@ -22,7 +22,10 @@ class BaseAttention(nn.Module):
         k = self.k(x).unsqueeze(1)
         v = self.v(x).unsqueeze(1)
         att_scores = torch.matmul(q, k.transpose(-2, -1)) / self.scale
+        att_scores = att_scores.masked_fill_(torch.isinf(att_scores), 0.0)
+        mask = torch.isfinite(att_scores)
         att_weight = F.softmax(att_scores, dim=-1)
+        att_weight = att_weight * mask.float()
         att_weight = self.dropout(att_weight)
         out = torch.matmul(att_weight, v)
         return out.squeeze(1)
@@ -51,25 +54,27 @@ class LogEdgeAttention(BaseAttention):
 class CNNEncoder(nn.Module):
     def __init__(self, args):
         super(CNNEncoder, self).__init__()
-        self.conv1 = nn.Conv2d(3, args.channels1, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(3, args.cnn_encoder_channels1, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(
-            args.channels1, args.channels2, kernel_size=3, padding=1)
+            args.cnn_encoder_channels1, args.cnn_encoder_channels2, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(
-            args.channels2, args.channels3, kernel_size=3, padding=1)
+            args.cnn_encoder_channels2, args.cnn_encoder_channels3, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
-        self.batch_norm1 = nn.BatchNorm2d(args.channels1)
-        self.batch_norm2 = nn.BatchNorm2d(args.channels2)
-        self.batch_norm3 = nn.BatchNorm2d(args.channels3)
+        self.batch_norm1 = nn.BatchNorm2d(args.cnn_encoder_channels1)
+        self.batch_norm2 = nn.BatchNorm2d(args.cnn_encoder_channels2)
+        self.batch_norm3 = nn.BatchNorm2d(args.cnn_encoder_channels3)
         self.pool = nn.MaxPool2d(2, 2)
 
     def forward(self, x):
-        x = F.relu(self.batch_norm1(self.conv1(x)))
-        x = self.pool(x)
-        x = F.relu(self.batch_norm2(self.conv2(x)))
-        x = self.pool(x)
-        x = F.relu(self.batch_norm3(self.conv3(x)))
-        x = self.pool(x)
-        return x
+        x1 = F.relu(self.batch_norm1(self.conv1(x)))
+        x2 = self.pool(x1)
+        x3 = F.relu(self.batch_norm2(self.conv2(x2)))
+        x4 = self.pool(x3)
+        x5 = F.relu(self.batch_norm3(self.conv3(x4)))
+        x6 = self.pool(x5)
+        if check_nan([x1, x2, x3, x4, x5, x6]):
+            raise ValueError('nan in forward')
+        return x6
 
 
 class BAE(nn.Module):
@@ -148,19 +153,19 @@ class BAE(nn.Module):
             in_dim=self.log_dim, out_dim=len(self.log_edges), dropout=att_dp)
 
     def apply_attention(self, node_repr, edge_repr, attended_node, attended_edge, edge_list, node_list):
-        enhanced_node_repr = node_repr.clone()
+        node_repr = node_repr.clone()
         for idx, node in enumerate(node_list):
-            enhanced_node_repr[:, node, :] = \
+            node_repr[:, node, :] = \
                 (node_repr[:, node, :]) + \
                 (attended_node[:, idx].unsqueeze(-1))
 
-        enhanced_edge_repr = edge_repr.clone()
+        edge_repr = edge_repr.clone()
         for idx, edge in enumerate(edge_list):
-            enhanced_edge_repr[:, edge[0], edge[1]] = \
+            edge_repr[:, edge[0], edge[1]] = \
                 ((edge_repr[:, edge[0], edge[1]].view(-1, 1)) +
                     (attended_edge[:, idx].unsqueeze(1))).view(-1)
 
-        return enhanced_node_repr, enhanced_edge_repr
+        return node_repr, edge_repr
 
     def encode(self, x):
         h1 = self.encoder(x)
@@ -171,6 +176,7 @@ class BAE(nn.Module):
         edge_repr = output[:, :self.edge_dim]
         node_repr = output[:, self.edge_dim:]
         edge_repr = edge_repr.view(-1, self.node_dim, self.node_dim)
+        edge_repr = (edge_repr + edge_repr.transpose(-2, -1)) / 2
         node_repr = node_repr.view(-1, self.node_dim, self.num_features)
         return edge_repr, node_repr
 
@@ -190,12 +196,18 @@ class BAE(nn.Module):
         attended_optical_edge = self.optical_edge_attention(optical)
         node_repr, edge_repr = self.apply_attention(
             node_repr, edge_repr, attended_optical_node, attended_optical_edge, self.optical_edges, self.optical_nodes)
-        # TODO: important need normalization?
+
+        if check_nan([attended_optical_node, attended_optical_edge, node_repr, edge_repr]):
+            raise ValueError('nan in forward') 
+        
+        
         log_mean = log.mean(1)
         attended_log_node = self.log_node_attention(log_mean)
         attended_log_edge = self.log_edge_attention(log_mean)
         node_repr, edge_repr = self.apply_attention(
             node_repr, edge_repr, attended_log_node, attended_log_edge, self.log_edges, self.log_nodes)
+        if check_nan([attended_log_node, attended_log_edge, node_repr, edge_repr]):
+            raise ValueError('nan in forward')
         return edge_repr, node_repr, mu, logvar
 
 
@@ -268,7 +280,9 @@ class OutterBAE(nn.Module):
         self.apply(self._init_weights)
 
     def log_processor(self, x):
-        return x
+        mean = x.mean(dim=(0, 1), keepdim=True)
+        std = x.std(dim=(0, 1), keepdim=True) + 1e-5
+        return (x - mean) / std
 
     def _init_weights(self, m):
         if isinstance(m, (nn.Linear, nn.Conv2d)):
@@ -277,14 +291,27 @@ class OutterBAE(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, original, optical, log):
+        # TODO: improve better way to mixup the features
+        # pool = nn.Sequential(
+        #     nn.AdaptiveAvgPool3d((1, None, None)),
+        #     nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        # )
+        # original = pool(original)
         original = original.mean(dim=1)
         original = self.cnn(original).view(original.size(0), -1)
-
+        if check_nan([original]):
+            raise ValueError('nan in forward')
         optical = optical.mean(dim=1)
         optical = self.cnn(optical).view(optical.size(0), -1)
+        if check_nan([optical]):
+            raise ValueError('nan in forward')
 
         log = self.log_processor(log)
+        if check_nan([log]):
+            raise ValueError('nan in forward')
         edge_repr, node_repr, *_ = self.bae(original, optical, log)
+        if check_nan([edge_repr, node_repr]):
+            raise ValueError('nan in forward')
         return edge_repr, node_repr
 
 

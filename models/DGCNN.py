@@ -229,7 +229,7 @@ class DGCNN(nn.Module):
         x = x + node_embedding
         batch_size = len(x)
         if edge_weight.dim() == 2:
-            edge_weight = edge_weight.unsqueeze(0).repeat(16, 1, 1)
+            edge_weight = edge_weight.unsqueeze(0).repeat(batch_size, 1, 1)
         edge_idx, _ = self.append(self.edge_idx, batch_size)
         edge_weight = normalize_matrix_batch(edge_weight)
         edge_weight = edge_weight.reshape(-1)

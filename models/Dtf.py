@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-
+# TODO: important III now diffusion model is not needed
 class Embedding(nn.Module):
     def __init__(self, embde_dim=64):
         super(Embedding, self).__init__()
@@ -22,8 +22,8 @@ class DTF(nn.Module):
         super(DTF, self).__init__()
         self.args = args
         self.steps = args.diff_steps
-        self.embed_dim = args.embed_dim
-        self.embed = Embedding(args.embed_dim)
+        self.diffusion_embed_dim = args.diffusion_embed_dim
+        self.embed = Embedding(args.diffusion_embed_dim)
 
         self.encoder = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=3, padding=1),
@@ -40,7 +40,7 @@ class DTF(nn.Module):
         )
         
         self.decoder = nn.Sequential(
-            nn.Conv2d(128 + args.embed_dim, 64, kernel_size=3, padding=1),
+            nn.Conv2d(128 + args.diffusion_embed_dim, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             
@@ -58,16 +58,13 @@ class DTF(nn.Module):
         return noise_level
 
     def forward(self, x):
-        # TODO: important (30, 250) -> (30, 30)
-        # TODO: important make it!
-        # TODO: important before make it, just return fake output
         return torch.zeros(16, 1, 30, 30).to('cuda')
         
         noise_level = self.get_noise_level(x)
         features = self.encoder(x)
         noise_embed = self.embed(noise_level)
-        noise_embed = noise_embed.view(-1, self.embed_dim, 1, 1)
-        noise_embed = noise_embed.expand(-1, self.embed_dim, features.shape[2], features.shape[3])
+        noise_embed = noise_embed.view(-1, self.diffusion_embed_dim, 1, 1)
+        noise_embed = noise_embed.expand(-1, self.diffusion_embed_dim, features.shape[2], features.shape[3])
         combined = torch.cat([features, noise_embed], dim=1)
         return self.decoder(combined)
 

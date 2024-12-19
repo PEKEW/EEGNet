@@ -3,8 +3,10 @@ import models.Utils as mUtils
 import numpy as np
 from torch.nn import functional as F
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from models.Utils import check_nan, check_gradients, register_nan_hooks
 
 # TODO: improve train_xx and test_xx have a lot of similar code
+
 
 def l1_reg_loss(model, only=None, exclude=None):
     total_loss = 0
@@ -40,9 +42,9 @@ def l2_reg_loss(model, only=None, exclude=None):
 
 class Trainer(object):
     def __init__(self,
-                batch_size=256, num_epoch=50, lr=0.005, dropout=0.5, early_stop=20, num_classes=2,
-                optimizer='Adam', device=torch.device('cpu'),
-                extension: dict = {}):
+                 batch_size=256, num_epoch=50, lr=0.005, dropout=0.5, early_stop=20, num_classes=2,
+                 optimizer='Adam', device=torch.device('cpu'),
+                 extension: dict = {}):
         # self.model: torch.nn.Module
         # self.data_loader: torch.utils.data.DataLoader
         self.num_epoch = num_epoch
@@ -65,16 +67,21 @@ class Trainer(object):
     def _set_model(self, model):
         self.model = model
 
-    def init_optimizer(self):
+    def init_optimizer(self, mulit_optimizer=False):
         if self.optimizer_type == 'Adam':
             self.optimizer = torch.optim.Adam(
                 self.model.parameters(), lr=self.lr)
         else:
             self.optimizer = torch.optim.AdamW(
                 self.model.parameters(), lr=self.lr)
+        if mulit_optimizer:
+            self.optimizers = {
+                'class': self.model.get_optimizer_all(),
+                'rebuild': self.model.get_optimizer_rebuild(),
+                'contrastive': self.model.get_optimizer_contrastive()
+            }
 
     def get_model(self):
-        self.model = self.model.eval()
         return self.model
 
 
@@ -200,9 +207,9 @@ class CNNTrainer(Trainer):
 
 class DGCNNTrainer(Trainer):
     def __init__(self, edge_index, edge_weight,
-                num_classes, device, num_hiddens,
-                num_layers, dropout, batch_size,
-                lr, l1_reg, l2_reg, num_epochs, optimizer):
+                 num_classes, device, num_hiddens,
+                 num_layers, dropout, batch_size,
+                 lr, l1_reg, l2_reg, num_epochs, optimizer):
         super(DGCNNTrainer, self).__init__(
             num_classes=num_classes,
             batch_size=batch_size,
@@ -257,8 +264,8 @@ class DGCNNTrainer(Trainer):
                 num_correct_predict += np.sum(class_predict == label)
                 total_samples += eeg_data.size(0)
                 overlap.append([
-                    f"{batch['sub_id'][i]}_{batch['slice_id'][i]}" 
-                    for i in range(len(class_predict == label)) 
+                    f"{batch['sub_id'][i]}_{batch['slice_id'][i]}"
+                    for i in range(len(class_predict == label))
                     if (class_predict == label)[i]
                 ])
                 total_labels.extend([item for item in label])
@@ -281,9 +288,11 @@ class DGCNNTrainer(Trainer):
             num_classes = conf_matrix.shape[0]
             fprs = []
             for i in range(num_classes):
-                fp = np.sum(conf_matrix[:, i]) - conf_matrix[i, i]  # False Positives
+                fp = np.sum(conf_matrix[:, i]) - \
+                    conf_matrix[i, i]  # False Positives
                 tn = np.sum(conf_matrix) - np.sum(conf_matrix[i, :]) - \
-                    np.sum(conf_matrix[:, i]) + conf_matrix[i, i]  # True Negatives
+                    np.sum(conf_matrix[:, i]) + \
+                    conf_matrix[i, i]  # True Negatives
                 fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
                 fprs.append(fpr)
 
@@ -372,7 +381,7 @@ def get_gnn_trainer(args) -> DGCNNTrainer:
     )
 
 # TODO: imporve this is issential part for get_trainer func
-
+# TODO: important test func can not be continue compute during training
 def _get_video_trainer():
     pass
 
@@ -386,8 +395,7 @@ class MCDISTrainer(Trainer):
             dropout=dropout,
             device=device)
 
-
-    def _train(self, args, epoch_num):
+    def _train(self, args, epoch_num, writer=None):
         self.model.train()
         epoch_loss = {
             'total_loss': 0.0,
@@ -397,9 +405,12 @@ class MCDISTrainer(Trainer):
         }
         total_samples = 0
         num_correct_predict = 0
+        
+        # TODO: improve remove hooks if everything is ok
+        # hooks = register_nan_hooks(self.model)
 
-        for batch in self.data_loader:
-            self.optimizer.zero_grad()
+        # for batch in self.data_loader:
+        for bid, batch in enumerate(self.data_loader):
             eeg_data = batch['eeg'].to(self.device, non_blocking=True)
             original_data = batch['original'].to(self.device, non_blocking=True)
             optical_data = batch['optical'].to(self.device, non_blocking=True)
@@ -409,17 +420,26 @@ class MCDISTrainer(Trainer):
             output, personal_graph, video_graph, depersonal_graph = self.model(
                 eeg_data, original_data, optical_data, motion_data
             )
-
-            _loss = self.model.loss(personal_graph, video_graph, depersonal_graph, output, label)
+            _loss = self.model.loss(
+                personal_graph, video_graph, depersonal_graph, output, label)
+            
+            self.optimizer.zero_grad()
+            
             total_loss = _loss['total_loss']
             contrast_loss = _loss['contrast_loss']
             class_loss = _loss['class_loss']
             rebuild_loss = _loss['rebuild_loss']
-
-            # TODO: important where cal the reg items?
-            # TODO: important different loss use different optimizer optimize different params
+                
+            if check_nan([total_loss, contrast_loss, class_loss, rebuild_loss]):
+                raise ValueError("Loss is NaN")
+            
             total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=args.clip_norm)
+            
+            # if not check_gradients(self.model):
+            #     raise ValueError("Gradients are NaN")
+            
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=args.all_clip_norm)
             self.optimizer.step()
 
             with torch.no_grad():
@@ -442,57 +462,72 @@ class MCDISTrainer(Trainer):
             'num_correct': num_correct_predict,
             'acc': acc
         }
+        
+        # for hook in hooks:
+        #     hook.remove()
 
         return epoch_metrics
-    
+
     def _test(self):
         total_samples = 0
         epoch_metrics = {}
         num_correct_predict = 0
         total_class_predictions = []
         total_labels = []
-        
+        self.model.eval()
+
         with torch.no_grad():
             for batch in self.data_loader:
                 eeg_data = batch['eeg'].to(self.device, non_blocking=True)
-                original_data = batch['original'].to(self.device, non_blocking=True)
-                optical_data = batch['optical'].to(self.device, non_blocking=True)
-                motion_data = batch['motion'].to(self.device, non_blocking=True)
-                label = batch['label'].to(self.device, non_blocking=True).squeeze(1).long()
+                original_data = batch['original'].to(
+                    self.device, non_blocking=True)
+                optical_data = batch['optical'].to(
+                    self.device, non_blocking=True)
+                motion_data = batch['motion'].to(
+                    self.device, non_blocking=True)
+                label = batch['label'].to(
+                    self.device, non_blocking=True).squeeze(1).long()
 
-                output, _, _, _ = self.model(eeg_data, original_data, optical_data, motion_data)
+                output, _, _, _ = self.model(
+                    eeg_data, original_data, optical_data, motion_data)
                 pred = torch.argmax(output, dim=1)
                 num_correct_predict += (pred == label).sum().item()
 
                 total_samples += eeg_data.size(0)
-                
+
             epoch_metrics['num_correct'] = num_correct_predict
             epoch_metrics['acc'] = num_correct_predict / total_samples
-            
+
             y_true = np.array(total_labels)
             y_pred = np.array(total_class_predictions)
-            
+
             epoch_metrics['num_correct'] = num_correct_predict
             epoch_metrics['acc'] = num_correct_predict / total_samples
-            epoch_metrics['f1_macro'] = f1_score(y_true, y_pred, average='macro')
-            epoch_metrics['f1_weighted'] = f1_score(y_true, y_pred, average='weighted')
-            epoch_metrics['precision_macro'] = precision_score(y_true, y_pred, average='macro')
-            epoch_metrics['recall_macro'] = recall_score(y_true, y_pred, average='macro')
-            
+            epoch_metrics['f1_macro'] = f1_score(
+                y_true, y_pred, average='macro')
+            epoch_metrics['f1_weighted'] = f1_score(
+                y_true, y_pred, average='weighted')
+            epoch_metrics['precision_macro'] = precision_score(
+                y_true, y_pred, average='macro')
+            epoch_metrics['recall_macro'] = recall_score(
+                y_true, y_pred, average='macro')
+
             conf_matrix = confusion_matrix(y_true, y_pred)
             num_classes = conf_matrix.shape[0]
-            
+
             fprs = []
             for i in range(num_classes):
                 fp = np.sum(conf_matrix[:, i]) - conf_matrix[i, i]
-                tn = np.sum(conf_matrix) - np.sum(conf_matrix[i, :]) - np.sum(conf_matrix[:, i]) + conf_matrix[i, i]
+                tn = np.sum(
+                    conf_matrix) - np.sum(conf_matrix[i, :]) - np.sum(conf_matrix[:, i]) + conf_matrix[i, i]
                 fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
                 fprs.append(fpr)
-                
+
             epoch_metrics['false_positive_rates'] = fprs
             epoch_metrics['confusion_matrix'] = conf_matrix.tolist()
         return epoch_metrics
-        
+
+
 def get_video_trainer(args) -> CNNTrainer:
     return CNNTrainer(
         num_classes=args.num_classes,
@@ -502,6 +537,7 @@ def get_video_trainer(args) -> CNNTrainer:
         lr=args.lr,
         num_epochs=args.num_epochs
     )
+
 
 def get_eeg_trainer(args) -> DGCNNTrainer:
     _, edge_index, edge_weight = mUtils.get_edge_weight()
@@ -521,11 +557,12 @@ def get_eeg_trainer(args) -> DGCNNTrainer:
         optimizer=args.optimizer
     )
 
+
 def get_all_trainer(args) -> MCDISTrainer:
     return MCDISTrainer(
         device=torch.device('cuda' if not args.cpu else 'cpu'),
-        dropout=args.dropout,
-        batch_size=args.batch_size,
-        lr=args.lr,
-        num_epochs=args.num_epochs
+        dropout=args.mcdis_dropout,
+        batch_size=args.mcdis_batch_size,
+        lr=args.mcdis_lr,
+        num_epochs=args.mcdis_num_epochs
     )

@@ -456,3 +456,55 @@ def visualize_brain_regions(matrix, threshold):
         matrix, total_part, regions_mapping)
     G = create_region_graph(region_matrix, region_names)
     return plot_region_connectogram(G, threshold)
+
+# TODO: improve remove this function using
+def check_nan(datas: List[torch.Tensor]) -> bool:
+    for data in datas:
+        if torch.isnan(data).any():
+            return True
+    return False
+
+def check_gradients(model):
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            grad_norm = param.grad.data.norm()
+            param_norm = param.data.norm()
+            print(f'{name}:')
+            print(f'  grad norm: {grad_norm}')
+            print(f'  param norm: {param_norm}')
+            if torch.isnan(grad_norm) or torch.isnan(param_norm):
+                print(f'NaN detected in {name}!')
+                return False
+    return True
+
+
+def detailed_hook_fn(module, input, output):
+    if isinstance(input, tuple):
+        for i, inp in enumerate(input):
+            if torch.is_tensor(inp) and torch.isnan(inp).any():
+                print(f"\nNaN detected in INPUT {i} of {module.__class__.__name__}")
+                print(f"Input shape: {inp.shape}")
+                print(f"Input statistics: min={inp.min()}, max={inp.max()}, mean={inp.mean()}")
+                breakpoint()
+    
+    if torch.is_tensor(output):
+        if torch.isnan(output).any():
+            print(f"\nNaN detected in OUTPUT of {module.__class__.__name__}")
+            print(f"Output shape: {output.shape}")
+            print(f"Output statistics: min={output.min()}, max={output.max()}, mean={output.mean()}")
+            for name, param in module.named_parameters():
+                if param is not None:
+                    print(f"\nParameter {name}:")
+                    print(f"Shape: {param.shape}")
+                    print(f"Statistics: min={param.min()}, max={param.max()}, mean={param.mean()}")
+                    if param.grad is not None:
+                        print(f"Gradient statistics: min={param.grad.min()}, "
+                            f"max={param.grad.max()}, mean={param.grad.mean()}")
+            breakpoint()
+            
+def register_nan_hooks(model):
+    hooks = []
+    for _, module in model.named_modules():
+        hook = module.register_forward_hook(detailed_hook_fn)
+        hooks.append(hook)
+    return hooks
